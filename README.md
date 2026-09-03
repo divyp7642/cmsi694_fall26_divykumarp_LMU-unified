@@ -1,6 +1,6 @@
-# \# cmsi694\_fall26\_divykumarp\_LMU-unified
+\## Course Information
 
-# 
 
-# This repository contains my CMSI 694 coursework.
+
+Course: CMSI 694
 
