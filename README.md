@@ -1,6 +1,6 @@
-\## Course Information
+\## Purpose
 
 
 
-Course: CMSI 694
+This repository is used to practice Git commits, branches, and merging.
 
