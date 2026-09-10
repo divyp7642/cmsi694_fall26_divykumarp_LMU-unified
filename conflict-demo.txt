@@ -1,1 +1,1 @@
-The main feature of LMU Unified is helping students discover campus events.
+The main features of LMU Unified are helping students discover campus events and analyzing campus event data.
