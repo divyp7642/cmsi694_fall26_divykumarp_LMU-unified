@@ -19,6 +19,13 @@ class AuthControllerTest {
 
         assertTrue(validator.validate(request).isEmpty());
     }
+    @Test
+void acceptsStaffLmuEmail() {
+    LoginRequest request =
+            new LoginRequest("faculty@lmu.edu");
+
+    assertTrue(validator.validate(request).isEmpty());
+}
 
     @Test
     void rejectsNonLmuEmail() {
