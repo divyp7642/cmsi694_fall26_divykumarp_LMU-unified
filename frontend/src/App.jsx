@@ -8,6 +8,7 @@ const [otpSent, setOtpSent] = useState(false)
 const [message, setMessage] = useState('')
 const [isError, setIsError] = useState(false)
 const [isLoading, setIsLoading] = useState(false)
+const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -81,6 +82,9 @@ async function handleVerify(event) {
     const data = await response.json()
     setMessage(data.message)
     setIsError(!response.ok)
+    if (response.ok) {
+  setIsAuthenticated(true)
+}
   } catch {
     setMessage('Unable to contact the login service')
     setIsError(true)
@@ -88,62 +92,84 @@ async function handleVerify(event) {
     setIsLoading(false)
   }
 }
-  return (
-    <main className="login-page">
-      <section className="login-card">
-        <p className="brand">LMU Unified</p>
-        <h1>{otpSent ? 'Verify your code' : 'Begin secure login'}</h1>
+function handleLogout() {
+  setIsAuthenticated(false)
+  setOtpSent(false)
+  setEmail('')
+  setOtp('')
+  setMessage('You have been logged out')
+  setIsError(false)
+}
+ return (
+  <main className="login-page">
+    <section className="login-card">
+      <p className="brand">LMU Unified</p>
 
-<p className="subtitle">
-  {otpSent
-    ? `Enter the verification code sent to ${email}.`
-    : 'Enter your LMU email address to continue.'}
-</p>
+      {isAuthenticated ? (
+        <>
+          <h1>Welcome to LMU Unified</h1>
+          <p className="subtitle">Signed in as {email}</p>
 
-        {!otpSent ? (
-  <form onSubmit={handleSubmit} noValidate>
-    <label htmlFor="email">LMU email address</label>
-    <input
-      id="email"
-      type="email"
-      value={email}
-      onChange={(event) => setEmail(event.target.value)}
-      placeholder="name@lmu.edu"
-      autoComplete="email"
-    />
+          <button type="button" onClick={handleLogout}>
+            Log out
+          </button>
+        </>
+      ) : (
+        <>
+          <h1>{otpSent ? 'Verify your code' : 'Begin secure login'}</h1>
 
-    <button type="submit" disabled={isLoading}>
-      {isLoading ? 'Sending...' : 'Continue'}
-    </button>
-  </form>
-) : (
-  <form onSubmit={handleVerify} noValidate>
-    <label htmlFor="otp">Verification code</label>
-    <input
-      id="otp"
-      type="text"
-      value={otp}
-      onChange={(event) => setOtp(event.target.value)}
-      placeholder="Enter 6-digit OTP"
-      inputMode="numeric"
-      maxLength={6}
-      autoComplete="one-time-code"
-    />
-
-    <button type="submit" disabled={isLoading}>
-      {isLoading ? 'Verifying...' : 'Verify OTP'}
-    </button>
-  </form>
-)}
-
-        {message && (
-          <p className={isError ? 'message error' : 'message success'}>
-            {message}
+          <p className="subtitle">
+            {otpSent
+              ? `Enter the verification code sent to ${email}.`
+              : 'Enter your LMU email address to continue.'}
           </p>
-        )}
-      </section>
-    </main>
-  )
+
+          {!otpSent ? (
+            <form onSubmit={handleSubmit} noValidate>
+              <label htmlFor="email">LMU email address</label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="name@lmu.edu"
+                autoComplete="email"
+              />
+
+              <button type="submit" disabled={isLoading}>
+                {isLoading ? 'Sending...' : 'Continue'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerify} noValidate>
+              <label htmlFor="otp">Verification code</label>
+              <input
+                id="otp"
+                type="text"
+                value={otp}
+                onChange={(event) => setOtp(event.target.value)}
+                placeholder="Enter 6-digit OTP"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="one-time-code"
+              />
+
+              <button type="submit" disabled={isLoading}>
+                {isLoading ? 'Verifying...' : 'Verify OTP'}
+              </button>
+            </form>
+          )}
+
+          {message && (
+            <p className={isError ? 'message error' : 'message success'}>
+              {message}
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  </main>
+)
 }
 
 export default App
