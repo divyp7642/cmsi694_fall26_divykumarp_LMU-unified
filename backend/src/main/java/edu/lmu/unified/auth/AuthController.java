@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
 
 @CrossOrigin(origins = "http://localhost:5173")
 @RestController
@@ -32,4 +33,24 @@ public class AuthController {
                 "email", request.email()
         ));
     }
+    @PostMapping("/verify")
+public ResponseEntity<Map<String, String>> verifyOtp(
+        @Valid @RequestBody VerifyOtpRequest request) {
+
+    boolean verified = otpService.verifyOtp(
+            request.email(),
+            request.otp()
+    );
+
+    if (!verified) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                "message", "Invalid or expired OTP"
+        ));
+    }
+
+    return ResponseEntity.ok(Map.of(
+            "message", "Authentication successful",
+            "email", request.email()
+    ));
+}
 }

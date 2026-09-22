@@ -27,6 +27,22 @@ public class OtpService {
         otpStore.put(normalizedEmail, new OtpEntry(otp, expiresAt));
         emailService.sendOtp(normalizedEmail, otp);
     }
+    public boolean verifyOtp(String email, String submittedOtp) {
+    String normalizedEmail = email.trim().toLowerCase();
+    OtpEntry entry = otpStore.get(normalizedEmail);
+
+    if (entry == null || Instant.now().isAfter(entry.expiresAt())) {
+        otpStore.remove(normalizedEmail);
+        return false;
+    }
+
+    if (!entry.otp().equals(submittedOtp)) {
+        return false;
+    }
+
+    otpStore.remove(normalizedEmail);
+    return true;
+}
 
     private record OtpEntry(String otp, Instant expiresAt) {
     }

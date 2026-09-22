@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -45,4 +46,22 @@ class OtpServiceTest {
         verify(emailService, times(2))
                 .sendOtp(eq("student@lmu.edu"), anyString());
     }
+    @Test
+void validOtpCanBeUsedOnlyOnce() {
+    EmailService emailService = mock(EmailService.class);
+    OtpService otpService = new OtpService(emailService);
+    ArgumentCaptor<String> otpCaptor = ArgumentCaptor.forClass(String.class);
+
+    otpService.requestOtp("student@lmu.edu");
+
+    verify(emailService).sendOtp(
+            eq("student@lmu.edu"),
+            otpCaptor.capture()
+    );
+
+    String otp = otpCaptor.getValue();
+
+    assertTrue(otpService.verifyOtp("student@lmu.edu", otp));
+    assertFalse(otpService.verifyOtp("student@lmu.edu", otp));
+}
 }
