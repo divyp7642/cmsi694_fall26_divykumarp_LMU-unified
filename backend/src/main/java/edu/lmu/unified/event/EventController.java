@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -15,7 +16,7 @@ public class EventController {
     @GetMapping
     public List<Event> getUpcomingEvents() {
 
-        return List.of(
+        List<Event> events = List.of(
                 new Event(
                         1L,
                         "LMU Career Fair",
@@ -46,5 +47,12 @@ public class EventController {
                         "Entertainment"
                 )
         );
+
+        return events.stream()
+                .filter(event ->
+                        !LocalDate.parse(event.date())
+                                .isBefore(LocalDate.now())
+                )
+                .toList();
     }
 }
