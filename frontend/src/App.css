@@ -160,6 +160,34 @@ button:disabled {
   font-weight: 700;
 }
 
+/* SCRUM-16 - Search and Filter */
+
+.event-controls {
+  display: flex;
+  gap: 16px;
+  margin: 25px 0;
+}
+
+.event-controls input {
+  flex: 1;
+}
+
+.event-controls select {
+  min-width: 200px;
+  padding: 14px;
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  color: #222;
+  background: white;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.event-controls select:focus {
+  border-color: #7a0019;
+  outline: 3px solid rgba(122, 0, 25, 0.15);
+}
+
 @media (max-width: 520px) {
   .login-card {
     padding: 28px 20px;
@@ -171,5 +199,13 @@ button:disabled {
 
   .event-list {
     grid-template-columns: 1fr;
+  }
+
+  .event-controls {
+    flex-direction: column;
+  }
+
+  .event-controls select {
+    width: 100%;
   }
 }
