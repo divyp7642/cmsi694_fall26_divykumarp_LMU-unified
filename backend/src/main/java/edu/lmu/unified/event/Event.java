@@ -1,3 +1,4 @@
+
 package edu.lmu.unified.event;
 
 public record Event(
@@ -7,6 +8,8 @@ public record Event(
         String date,
         String time,
         String location,
-        String category
+        String category,
+        String organizer,
+        String status
 ) {
 }

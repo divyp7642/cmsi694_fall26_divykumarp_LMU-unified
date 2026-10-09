@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
 
+import { useEffect, useState } from 'react'
 import './App.css'
 
 function App() {
@@ -19,6 +19,10 @@ function App() {
 
   // Sprint 2 - Event Discovery
   const [events, setEvents] = useState([])
+
+  // SCRUM-17 - Event Details
+  const [selectedEvent, setSelectedEvent] = useState(null)
+  const [isDetailsLoading, setIsDetailsLoading] = useState(false)
 
   // SCRUM-16 - Search and Filter
   const [searchTerm, setSearchTerm] = useState('')
@@ -42,6 +46,8 @@ function App() {
 
         const data = await response.json()
         setEvents(data)
+        setMessage('')
+        setIsError(false)
       } catch {
         setMessage('Unable to load upcoming events')
         setIsError(true)
@@ -140,7 +146,6 @@ function App() {
       if (response.ok) {
         setIsAuthenticated(true)
 
-        // Keep user logged in after page refresh
         sessionStorage.setItem(
           'lmuAuthenticated',
           'true'
@@ -168,6 +173,7 @@ function App() {
     setEmail('')
     setOtp('')
     setEvents([])
+    setSelectedEvent(null)
     setSearchTerm('')
     setSelectedCategory('All')
     setSelectedDate('')
@@ -175,14 +181,56 @@ function App() {
     setIsError(false)
   }
 
-  // SCRUM-16 - Clear all event filters
+  // SCRUM-16 - Clear Filters
   function clearFilters() {
     setSearchTerm('')
     setSelectedCategory('All')
     setSelectedDate('')
   }
 
-  // SCRUM-16 - Search and filter events
+  // SCRUM-17 - Fetch complete event details
+  async function handleViewDetails(event) {
+    setMessage('')
+    setIsError(false)
+    setIsDetailsLoading(true)
+
+    try {
+      const response = await fetch(
+        `http://localhost:8080/api/events/${event.id}`
+      )
+
+      if (response.status === 404) {
+        setSelectedEvent(null)
+        setMessage('This event is no longer available.')
+        setIsError(true)
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error('Unable to load event details')
+      }
+
+      const data = await response.json()
+      setSelectedEvent(data)
+    } catch {
+      setSelectedEvent(null)
+      setMessage(
+        'Unable to load event details. Please try again.'
+      )
+      setIsError(true)
+    } finally {
+      setIsDetailsLoading(false)
+    }
+  }
+
+  // SCRUM-17 - Back to Events
+  function handleBackToEvents() {
+    setSelectedEvent(null)
+    setMessage('')
+    setIsError(false)
+  }
+
+  // SCRUM-16 - Search and Filter
   const filteredEvents = events.filter((event) => {
     const search = searchTerm.trim().toLowerCase()
 
@@ -215,106 +263,165 @@ function App() {
 
         {isAuthenticated ? (
           <>
-            <h1>Upcoming LMU Events</h1>
+            {selectedEvent ? (
+              // SCRUM-17 - Event Details
+              <div className="event-details">
 
-            <p className="subtitle">
-              Signed in as {email}
-            </p>
+                <button
+                  type="button"
+                  onClick={handleBackToEvents}
+                >
+                  ← Back to Events
+                </button>
 
-            <div className="event-controls">
+                <h1>{selectedEvent.title}</h1>
 
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(event) =>
-                  setSearchTerm(event.target.value)
-                }
-                placeholder="Search events..."
-              />
+                <p className="event-category">
+                  {selectedEvent.category}
+                </p>
 
-              <select
-                value={selectedCategory}
-                onChange={(event) =>
-                  setSelectedCategory(event.target.value)
-                }
-              >
-                <option value="All">
-                  All Categories
-                </option>
+                <p className="subtitle">
+                  {selectedEvent.description}
+                </p>
 
-                <option value="Career">
-                  Career
-                </option>
+                {selectedEvent.status === 'CANCELLED' && (
+                  <p className="message error">
+                    This event has been cancelled.
+                    Please check other upcoming events.
+                  </p>
+                )}
 
-                <option value="Technology">
-                  Technology
-                </option>
+                <div className="event-card">
+                  <p>
+                    <strong>Date:</strong>{' '}
+                    {selectedEvent.date}
+                  </p>
 
-                <option value="Entertainment">
-                  Entertainment
-                </option>
-              </select>
+                  <p>
+                    <strong>Time:</strong>{' '}
+                    {selectedEvent.time}
+                  </p>
 
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(event) =>
-                  setSelectedDate(event.target.value)
-                }
-              />
+                  <p>
+                    <strong>Location:</strong>{' '}
+                    {selectedEvent.location}
+                  </p>
 
-              <button
-                type="button"
-                onClick={clearFilters}
-              >
-                Clear Filters
-              </button>
+                  <p>
+                    <strong>Category:</strong>{' '}
+                    {selectedEvent.category}
+                  </p>
 
-            </div>
+                  <p>
+                    <strong>Organizer:</strong>{' '}
+                    {selectedEvent.organizer}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              // Sprint 2 - Event Dashboard
+              <>
+                <h1>Upcoming LMU Events</h1>
 
-            <div className="event-list">
+                <p className="subtitle">
+                  Signed in as {email}
+                </p>
 
-              {filteredEvents.length === 0 ? (
-                <p>No events match your search.</p>
-              ) : (
-                filteredEvents.map((event) => (
-                  <div
-                    className="event-card"
-                    key={event.id}
+                <div className="event-controls">
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(event) =>
+                      setSearchTerm(event.target.value)
+                    }
+                    placeholder="Search events..."
+                  />
+
+                  <select
+                    value={selectedCategory}
+                    onChange={(event) =>
+                      setSelectedCategory(event.target.value)
+                    }
                   >
+                    <option value="All">
+                      All Categories
+                    </option>
+                    <option value="Career">
+                      Career
+                    </option>
+                    <option value="Technology">
+                      Technology
+                    </option>
+                    <option value="Entertainment">
+                      Entertainment
+                    </option>
+                  </select>
 
-                    <p className="event-category">
-                      {event.category}
-                    </p>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(event) =>
+                      setSelectedDate(event.target.value)
+                    }
+                  />
 
-                    <h2>
-                      {event.title}
-                    </h2>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
 
-                    <p>
-                      {event.description}
-                    </p>
+                <div className="event-list">
+                  {filteredEvents.length === 0 ? (
+                    <p>No events match your search.</p>
+                  ) : (
+                    filteredEvents.map((event) => (
+                      <div
+                        className="event-card"
+                        key={event.id}
+                      >
+                        <p className="event-category">
+                          {event.category}
+                        </p>
 
-                    <p>
-                      <strong>Date:</strong>{' '}
-                      {event.date}
-                    </p>
+                        <h2>{event.title}</h2>
 
-                    <p>
-                      <strong>Time:</strong>{' '}
-                      {event.time}
-                    </p>
+                        <p>{event.description}</p>
 
-                    <p>
-                      <strong>Location:</strong>{' '}
-                      {event.location}
-                    </p>
+                        <p>
+                          <strong>Date:</strong>{' '}
+                          {event.date}
+                        </p>
 
-                  </div>
-                ))
-              )}
+                        <p>
+                          <strong>Time:</strong>{' '}
+                          {event.time}
+                        </p>
 
-            </div>
+                        <p>
+                          <strong>Location:</strong>{' '}
+                          {event.location}
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleViewDetails(event)
+                          }
+                          disabled={isDetailsLoading}
+                        >
+                          {isDetailsLoading
+                            ? 'Loading...'
+                            : 'View Details'}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
 
             {message && isError && (
               <p className="message error">
@@ -348,7 +455,6 @@ function App() {
                 onSubmit={handleSubmit}
                 noValidate
               >
-
                 <label htmlFor="email">
                   LMU email address
                 </label>
@@ -372,14 +478,12 @@ function App() {
                     ? 'Sending...'
                     : 'Continue'}
                 </button>
-
               </form>
             ) : (
               <form
                 onSubmit={handleVerify}
                 noValidate
               >
-
                 <label htmlFor="otp">
                   Verification code
                 </label>
@@ -405,7 +509,6 @@ function App() {
                     ? 'Verifying...'
                     : 'Verify OTP'}
                 </button>
-
               </form>
             )}
 
