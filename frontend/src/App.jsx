@@ -1,16 +1,12 @@
-
 import { useEffect, useState } from 'react'
 import './App.css'
-
 const API_URL = 'http://localhost:8080'
-
 const navigation = [
   { id: 'dashboard', icon: '◫', label: 'Dashboard' },
   { id: 'explore', icon: '▦', label: 'Explore Events' },
   { id: 'rsvps', icon: '✓', label: 'My RSVPs' },
   { id: 'profile', icon: '◎', label: 'Profile' },
 ]
-
 function App() {
   const [email, setEmail] = useState(
     () => sessionStorage.getItem('lmuEmail') || ''
@@ -20,10 +16,19 @@ function App() {
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-
   const [isAuthenticated, setIsAuthenticated] = useState(
     () => Boolean(sessionStorage.getItem('lmuToken'))
   )
+
+  // SCRUM-20 - Administrator dashboard and role detection
+  const [userRole, setUserRole] = useState(null)
+  const [adminDashboard, setAdminDashboard] = useState(null)
+  const [adminDashboardError, setAdminDashboardError] = useState('')
+  const [isAdminDashboardLoading, setIsAdminDashboardLoading] = useState(false)
+  const isAdmin = userRole === 'ADMIN'
+  const currentNavigation = isAdmin
+    ? navigation.filter((item) => item.id !== 'rsvps')
+    : navigation
 
   // SCRUM-19 - Student Dashboard
   const [studentDashboard, setStudentDashboard] = useState(null)
@@ -65,7 +70,6 @@ function App() {
 
   function getAuthHeaders() {
     const token = sessionStorage.getItem('lmuToken')
-
     return {
       Authorization: `Bearer ${token || ''}`,
     }
@@ -75,31 +79,29 @@ function App() {
     sessionStorage.removeItem('lmuToken')
     sessionStorage.removeItem('lmuAuthenticated')
     sessionStorage.removeItem('lmuEmail')
-
     setIsAuthenticated(false)
     setEmail('')
     setOtp('')
     setOtpSent(false)
-
+    setUserRole(null)
+    setAdminDashboard(null)
+    setAdminDashboardError('')
+    setIsAdminDashboardLoading(false)
     setStudentDashboard(null)
     setStudentDashboardError('')
     setRegisteredEvents([])
     setRegisteredEventsError('')
     setRegistrationVersion(0)
-
     setEvents([])
     setEventsError('')
     setSelectedEvent(null)
-
     setSearchTerm('')
     setSelectedCategory('All')
     setSelectedDate('')
-
     setHasRsvp(false)
     setRsvpCount(0)
     setRsvpMessage('')
     setRsvpError(false)
-
     setActivePage('dashboard')
     setIsSidebarOpen(false)
   }
@@ -110,16 +112,72 @@ function App() {
     setIsError(true)
   }
 
-  // Load Student Dashboard
+  // SCRUM-20 - Determine role using the protected backend endpoints.
+
+  // Admin is checked first so a valid administrator never hits student-only APIs.
+
   useEffect(() => {
     if (!isAuthenticated) return
-
     let cancelled = false
+    async function detectRole() {
+      setUserRole(null)
+      setAdminDashboard(null)
+      setAdminDashboardError('')
+      setIsAdminDashboardLoading(true)
+      try {
+        const response = await fetch(`${API_URL}/api/admin/dashboard`, {
+          headers: getAuthHeaders(),
+        })
+        if (cancelled) return
+        if (response.status === 401) {
+          handleSessionExpired()
+          return
+        }
+        if (response.ok) {
+          const data = await response.json()
+          if (!cancelled) {
+            setAdminDashboard(data)
+            setUserRole('ADMIN')
+          }
+          return
+        }
+        if (response.status === 403) {
 
+          // A student is expected to receive 403 on the admin endpoint.
+          const studentResponse = await fetch(`${API_URL}/api/student/dashboard`, {
+            headers: getAuthHeaders(),
+          })
+          if (cancelled) return
+          if (studentResponse.status === 401) {
+            handleSessionExpired()
+            return
+          }
+          if (studentResponse.ok) {
+            setUserRole('STUDENT')
+          } else {
+            setAdminDashboardError('Your account does not have dashboard access.')
+          }
+          return
+        }
+        setAdminDashboardError('Unable to determine your account role.')
+      } catch {
+        if (!cancelled) setAdminDashboardError('Unable to contact the authentication service.')
+      } finally {
+        if (!cancelled) setIsAdminDashboardLoading(false)
+      }
+    }
+    detectRole()
+    return () => { cancelled = true }
+  }, [isAuthenticated])
+
+  // Load Student Dashboard
+
+  useEffect(() => {
+    if (!isAuthenticated || userRole !== 'STUDENT') return
+    let cancelled = false
     async function loadStudentDashboard() {
       setIsStudentDashboardLoading(true)
       setStudentDashboardError('')
-
       try {
         const response = await fetch(
           `${API_URL}/api/student/dashboard`,
@@ -128,27 +186,21 @@ function App() {
             headers: getAuthHeaders(),
           }
         )
-
         if (cancelled) return
-
         if (response.status === 401) {
           handleSessionExpired()
           return
         }
-
         if (response.status === 403) {
           setStudentDashboardError(
             'Access denied. Student role required.'
           )
           return
         }
-
         if (!response.ok) {
           throw new Error('Unable to load dashboard')
         }
-
         const data = await response.json()
-
         if (!cancelled) {
           setStudentDashboard(data)
         }
@@ -164,24 +216,20 @@ function App() {
         }
       }
     }
-
     loadStudentDashboard()
-
     return () => {
       cancelled = true
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, userRole])
 
   // Load Registered Events
+
   useEffect(() => {
-    if (!isAuthenticated) return
-
+    if (!isAuthenticated || userRole !== 'STUDENT') return
     let cancelled = false
-
     async function loadRegisteredEvents() {
       setIsRegisteredEventsLoading(true)
       setRegisteredEventsError('')
-
       try {
         const response = await fetch(
           `${API_URL}/api/student/registered-events`,
@@ -190,27 +238,21 @@ function App() {
             headers: getAuthHeaders(),
           }
         )
-
         if (cancelled) return
-
         if (response.status === 401) {
           handleSessionExpired()
           return
         }
-
         if (response.status === 403) {
           setRegisteredEventsError(
             'Access denied. Student role required.'
           )
           return
         }
-
         if (!response.ok) {
           throw new Error('Unable to load registered events')
         }
-
         const data = await response.json()
-
         if (!cancelled) {
           setRegisteredEvents(
             Array.isArray(data) ? data : []
@@ -228,32 +270,25 @@ function App() {
         }
       }
     }
-
     loadRegisteredEvents()
-
     return () => {
       cancelled = true
     }
-  }, [isAuthenticated, registrationVersion])
+  }, [isAuthenticated, userRole, registrationVersion])
 
   // Load Upcoming Events
+
   useEffect(() => {
     if (!isAuthenticated) return
-
     let cancelled = false
-
     async function loadEvents() {
       setEventsError('')
-
       try {
         const response = await fetch(`${API_URL}/api/events`)
-
         if (!response.ok) {
           throw new Error('Unable to load events')
         }
-
         const data = await response.json()
-
         if (!cancelled) {
           setEvents(Array.isArray(data) ? data : [])
         }
@@ -263,27 +298,23 @@ function App() {
         }
       }
     }
-
     loadEvents()
-
     return () => {
       cancelled = true
     }
   }, [isAuthenticated])
 
   // Request OTP
+
   async function handleSubmit(event) {
     event.preventDefault()
-
     const lmuEmailPattern =
       /^[A-Za-z0-9._%+-]+@(lion\.)?lmu\.edu$/i
-
     if (!email.trim()) {
       setMessage('Email is required')
       setIsError(true)
       return
     }
-
     if (!lmuEmailPattern.test(email.trim())) {
       setMessage(
         'Use your @lmu.edu or @lion.lmu.edu email'
@@ -291,10 +322,8 @@ function App() {
       setIsError(true)
       return
     }
-
     setIsLoading(true)
     setMessage('')
-
     try {
       const response = await fetch(
         `${API_URL}/api/auth/login`,
@@ -308,13 +337,10 @@ function App() {
           }),
         }
       )
-
       if (!response.ok) {
         throw new Error('Login request failed')
       }
-
       const data = await response.json()
-
       setMessage(data.message)
       setIsError(false)
       setOtpSent(true)
@@ -327,18 +353,16 @@ function App() {
   }
 
   // Verify OTP
+
   async function handleVerify(event) {
     event.preventDefault()
-
     if (!/^\d{6}$/.test(otp.trim())) {
       setMessage('Enter the 6-digit OTP')
       setIsError(true)
       return
     }
-
     setIsLoading(true)
     setMessage('')
-
     try {
       const response = await fetch(
         `${API_URL}/api/auth/verify`,
@@ -353,9 +377,7 @@ function App() {
           }),
         }
       )
-
       const data = await response.json()
-
       if (!response.ok) {
         setMessage(
           data.message || 'OTP verification failed'
@@ -363,18 +385,15 @@ function App() {
         setIsError(true)
         return
       }
-
       if (!data.token) {
         throw new Error('Session token missing')
       }
-
       sessionStorage.setItem('lmuToken', data.token)
       sessionStorage.setItem(
         'lmuAuthenticated',
         'true'
       )
       sessionStorage.setItem('lmuEmail', data.email)
-
       setEmail(data.email)
       setIsAuthenticated(true)
       setMessage('')
@@ -389,14 +408,12 @@ function App() {
   }
 
   // Logout
+
   async function handleLogout() {
     const token = sessionStorage.getItem('lmuToken')
-
     clearLocalSession()
-
     setMessage('You have been logged out')
     setIsError(false)
-
     if (token) {
       try {
         await fetch(`${API_URL}/api/auth/logout`, {
@@ -406,12 +423,14 @@ function App() {
           },
         })
       } catch {
+
         // Local session has already been cleared.
       }
     }
   }
 
   // Sidebar Navigation
+
   function navigate(page) {
     setActivePage(page)
     setSelectedEvent(null)
@@ -427,11 +446,11 @@ function App() {
   }
 
   // Load RSVP Status
+
   async function loadRsvpStatus(eventId) {
     setIsRsvpStatusLoading(true)
     setRsvpMessage('')
     setRsvpError(false)
-
     try {
       const response = await fetch(
         `${API_URL}/api/events/${eventId}/rsvp`,
@@ -440,18 +459,14 @@ function App() {
           headers: getAuthHeaders(),
         }
       )
-
       if (response.status === 401) {
         handleSessionExpired()
         return
       }
-
       if (!response.ok) {
         throw new Error('Unable to load RSVP status')
       }
-
       const data = await response.json()
-
       setHasRsvp(Boolean(data.hasRsvp))
       setRsvpCount(data.rsvpCount)
     } catch {
@@ -463,6 +478,7 @@ function App() {
   }
 
   // View Event Details
+
   async function handleViewDetails(event) {
     setMessage('')
     setIsError(false)
@@ -471,28 +487,21 @@ function App() {
     setHasRsvp(false)
     setRsvpCount(0)
     setRsvpMessage('')
-
     try {
       const response = await fetch(
         `${API_URL}/api/events/${event.id}`
       )
-
       if (response.status === 404) {
         setMessage('This event is no longer available.')
         setIsError(true)
         return
       }
-
       if (!response.ok) {
         throw new Error('Unable to load event details')
       }
-
       const data = await response.json()
-
       setSelectedEvent(data)
-
-      await loadRsvpStatus(data.id)
-
+      if (userRole === 'STUDENT') await loadRsvpStatus(data.id)
       window.scrollTo(0, 0)
     } catch {
       setSelectedEvent(null)
@@ -506,13 +515,12 @@ function App() {
   }
 
   // Register RSVP
+
   async function handleRsvp() {
     if (!selectedEvent || isRsvpLoading) return
-
     setIsRsvpLoading(true)
     setRsvpMessage('')
     setRsvpError(false)
-
     try {
       const response = await fetch(
         `${API_URL}/api/events/${selectedEvent.id}/rsvp`,
@@ -521,20 +529,16 @@ function App() {
           headers: getAuthHeaders(),
         }
       )
-
       if (response.status === 401) {
         handleSessionExpired()
         return
       }
-
       const data = await response.json()
-
       if (!response.ok) {
         setRsvpMessage(
           data.message || 'Unable to RSVP to this event.'
         )
         setRsvpError(true)
-
         if (response.status === 409) {
           await loadRsvpStatus(selectedEvent.id)
           setRsvpMessage(
@@ -542,15 +546,12 @@ function App() {
           )
           setRsvpError(true)
         }
-
         return
       }
-
       setHasRsvp(true)
       setRsvpCount(data.rsvpCount)
       setRsvpMessage(data.message)
       setRsvpError(false)
-
       setRegistrationVersion(
         (version) => version + 1
       )
@@ -565,13 +566,12 @@ function App() {
   }
 
   // Cancel RSVP
+
   async function handleCancelRsvp() {
     if (!selectedEvent || isRsvpLoading) return
-
     setIsRsvpLoading(true)
     setRsvpMessage('')
     setRsvpError(false)
-
     try {
       const response = await fetch(
         `${API_URL}/api/events/${selectedEvent.id}/rsvp`,
@@ -580,14 +580,11 @@ function App() {
           headers: getAuthHeaders(),
         }
       )
-
       if (response.status === 401) {
         handleSessionExpired()
         return
       }
-
       const data = await response.json()
-
       if (!response.ok) {
         setRsvpMessage(
           data.message || 'Unable to cancel RSVP.'
@@ -595,12 +592,10 @@ function App() {
         setRsvpError(true)
         return
       }
-
       setHasRsvp(false)
       setRsvpCount(data.rsvpCount)
       setRsvpMessage(data.message)
       setRsvpError(false)
-
       setRegistrationVersion(
         (version) => version + 1
       )
@@ -617,7 +612,6 @@ function App() {
   // Search and Filter
   const filteredEvents = events.filter((event) => {
     const search = searchTerm.trim().toLowerCase()
-
     const matchesSearch = [
       event.title,
       event.description,
@@ -626,29 +620,24 @@ function App() {
     ].some((value) =>
       String(value || '').toLowerCase().includes(search)
     )
-
     const matchesCategory =
       selectedCategory === 'All' ||
       event.category === selectedCategory
-
     const matchesDate =
       selectedDate === '' ||
       event.date === selectedDate
-
     return (
       matchesSearch &&
       matchesCategory &&
       matchesDate
     )
   })
-
   const categories = [
     'All',
     ...new Set(
       events.map((event) => event.category).filter(Boolean)
     ),
   ]
-
   const eventUnavailable = Boolean(
     selectedEvent &&
       (
@@ -659,6 +648,7 @@ function App() {
   )
 
   // Event Card
+
   function renderEventCard(event, registered = false) {
     return (
       <article className="portal-event-card" key={event.id}>
@@ -666,28 +656,23 @@ function App() {
           <span className="portal-category">
             {event.category}
           </span>
-
           {registered && (
             <span className="portal-confirmed">
               ✓ Registered
             </span>
           )}
         </div>
-
         <h3>{event.title}</h3>
-
         {event.description && (
           <p className="portal-event-description">
             {event.description}
           </p>
         )}
-
         <div className="portal-event-meta">
           <span>▦ &nbsp;{event.date}</span>
           <span>◷ &nbsp;{event.time}</span>
           <span>⌖ &nbsp;{event.location}</span>
         </div>
-
         <button
           type="button"
           className="portal-btn portal-btn-outline"
@@ -703,11 +688,11 @@ function App() {
   }
 
   // My Registered Events
+
   function renderRegisteredSection(compact = false) {
     const displayedEvents = compact
       ? registeredEvents.slice(0, 3)
       : registeredEvents
-
     return (
       <section className="portal-section">
         <div className="portal-section-heading">
@@ -721,7 +706,6 @@ function App() {
               Keep track of the events you've signed up for.
             </p>
           </div>
-
           {compact && (
             <button
               type="button"
@@ -732,7 +716,6 @@ function App() {
             </button>
           )}
         </div>
-
         {isRegisteredEventsLoading ? (
           <p className="portal-muted">
             Loading your registered events...
@@ -751,7 +734,6 @@ function App() {
             <p>
               Explore campus events and RSVP to see them here.
             </p>
-
             <button
               type="button"
               className="portal-btn"
@@ -772,11 +754,11 @@ function App() {
   }
 
   // Explore Events
+
   function renderExploreSection(compact = false) {
     const displayedEvents = compact
       ? events.slice(0, 3)
       : filteredEvents
-
     return (
       <section className="portal-section">
         <div className="portal-section-heading">
@@ -790,7 +772,6 @@ function App() {
               Find something great happening at LMU.
             </p>
           </div>
-
           {compact && (
             <button
               type="button"
@@ -801,7 +782,6 @@ function App() {
             </button>
           )}
         </div>
-
         {!compact && (
           <div className="portal-filters">
             <input
@@ -813,7 +793,6 @@ function App() {
                 setSearchTerm(event.target.value)
               }
             />
-
             <select
               aria-label="Event category"
               value={selectedCategory}
@@ -829,7 +808,6 @@ function App() {
                 </option>
               ))}
             </select>
-
             <input
               type="date"
               aria-label="Event date"
@@ -838,7 +816,6 @@ function App() {
                 setSelectedDate(event.target.value)
               }
             />
-
             <button
               type="button"
               className="portal-btn portal-btn-outline"
@@ -848,7 +825,6 @@ function App() {
             </button>
           </div>
         )}
-
         {eventsError && (
           <p
             className="portal-alert portal-error"
@@ -857,7 +833,6 @@ function App() {
             {eventsError}
           </p>
         )}
-
         {message && isError && (
           <p
             className="portal-alert portal-error"
@@ -866,13 +841,11 @@ function App() {
             {message}
           </p>
         )}
-
         <div className="portal-event-grid">
           {displayedEvents.map((event) =>
             renderEventCard(event)
           )}
         </div>
-
         {!eventsError && displayedEvents.length === 0 && (
           <div className="portal-empty">
             <h3>No events found</h3>
@@ -897,32 +870,26 @@ function App() {
             LMU <strong>Unified</strong>
           </span>
         </div>
-
         <section className="portal-login-card">
           <div className="portal-login-emblem">✦</div>
-
           <p className="portal-eyebrow">
             WELCOME TO LMU UNIFIED
           </p>
-
           <h1>
             {otpSent
               ? 'Verify your code'
               : 'Your campus, connected.'}
           </h1>
-
           <p className="portal-muted">
             {otpSent
               ? `Enter the verification code sent to ${email}.`
               : 'Sign in with your LMU email to discover events and manage your RSVPs.'}
           </p>
-
           {!otpSent ? (
             <form onSubmit={handleSubmit} noValidate>
               <label htmlFor="email">
                 LMU email address
               </label>
-
               <input
                 id="email"
                 type="email"
@@ -933,7 +900,6 @@ function App() {
                 placeholder="name@lmu.edu"
                 autoComplete="email"
               />
-
               <button
                 className="portal-btn portal-btn-wide"
                 type="submit"
@@ -947,7 +913,6 @@ function App() {
               <label htmlFor="otp">
                 Verification code
               </label>
-
               <input
                 id="otp"
                 type="text"
@@ -960,7 +925,6 @@ function App() {
                 maxLength={6}
                 autoComplete="one-time-code"
               />
-
               <button
                 className="portal-btn portal-btn-wide"
                 type="submit"
@@ -970,7 +934,6 @@ function App() {
                   ? 'Verifying...'
                   : 'Verify OTP →'}
               </button>
-
               <button
                 className="portal-text-btn"
                 type="button"
@@ -984,7 +947,6 @@ function App() {
               </button>
             </form>
           )}
-
           {message && (
             <p
               className={`portal-alert ${
@@ -1017,7 +979,6 @@ function App() {
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
-
       {/* Left Sidebar */}
       <aside
         className={`portal-sidebar ${
@@ -1026,12 +987,10 @@ function App() {
       >
         <div className="portal-sidebar-brand">
           <span className="portal-logo">L</span>
-
           <div>
             <strong>LMU Unified</strong>
-            <small>STUDENT PORTAL</small>
+            <small>{isAdmin ? 'ADMIN PORTAL' : 'STUDENT PORTAL'}</small>
           </div>
-
           <button
             type="button"
             className="portal-sidebar-close"
@@ -1041,16 +1000,14 @@ function App() {
             ×
           </button>
         </div>
-
         <p className="portal-nav-label">
           WORKSPACE
         </p>
-
         <nav
           className="portal-nav"
-          aria-label="Student navigation"
+          aria-label={isAdmin ? "Administrator navigation" : "Student navigation"}
         >
-          {navigation.map((item) => (
+          {currentNavigation.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -1067,9 +1024,7 @@ function App() {
               >
                 {item.icon}
               </span>
-
               <span>{item.label}</span>
-
               {item.id === 'rsvps' &&
                 registeredEvents.length > 0 && (
                   <span className="portal-nav-count">
@@ -1085,13 +1040,11 @@ function App() {
             <span className="portal-avatar">
               {(email || 'S')[0].toUpperCase()}
             </span>
-
             <div>
-              <strong>Student Account</strong>
+              <strong>{isAdmin ? 'Administrator Account' : 'Student Account'}</strong>
               <small title={email}>{email}</small>
             </div>
           </div>
-
           <button
             type="button"
             className="portal-nav-item portal-logout"
@@ -1119,21 +1072,18 @@ function App() {
           >
             ☰
           </button>
-
           <div className="portal-breadcrumb">
             LMU Unified <span>/</span>{' '}
             {selectedEvent
               ? 'Event Details'
-              : navigation.find(
+              : currentNavigation.find(
                   (item) => item.id === activePage
                 )?.label}
           </div>
-
           <div className="portal-topbar-right">
             <span className="portal-role-pill">
-              {studentDashboard?.role || 'STUDENT'}
+              {userRole || 'Checking...'}
             </span>
-
             <span className="portal-avatar portal-avatar-small">
               {(email || 'S')[0].toUpperCase()}
             </span>
@@ -1142,7 +1092,14 @@ function App() {
 
         <main className="portal-content">
           {/* Event Details */}
-          {selectedEvent ? (
+          {userRole === null ? (
+            <section className="portal-panel">
+              <h2>Checking account access</h2>
+              <p className="portal-muted">
+                {isAdminDashboardLoading ? 'Loading your account role...' : (adminDashboardError || 'Please wait...')}
+              </p>
+            </section>
+          ) : selectedEvent ? (
             <>
               <button
                 type="button"
@@ -1161,51 +1118,42 @@ function App() {
                     ? 'Dashboard'
                     : 'Events'}
               </button>
-
               <div className="portal-page-heading">
                 <span className="portal-category">
                   {selectedEvent.category}
                 </span>
-
                 <h1>{selectedEvent.title}</h1>
                 <p>{selectedEvent.description}</p>
               </div>
-
               {selectedEvent.status === 'CANCELLED' && (
                 <p className="portal-alert portal-error">
                   This event has been cancelled.
                   Please check other upcoming events.
                 </p>
               )}
-
               <div className="portal-detail-grid">
                 <section className="portal-panel">
                   <h2>Event Information</h2>
-
                   <div className="portal-info-row">
                     <span>Date</span>
                     <strong>{selectedEvent.date}</strong>
                   </div>
-
                   <div className="portal-info-row">
                     <span>Time</span>
                     <strong>{selectedEvent.time}</strong>
                   </div>
-
                   <div className="portal-info-row">
                     <span>Location</span>
                     <strong>
                       {selectedEvent.location}
                     </strong>
                   </div>
-
                   <div className="portal-info-row">
                     <span>Category</span>
                     <strong>
                       {selectedEvent.category}
                     </strong>
                   </div>
-
                   <div className="portal-info-row">
                     <span>Organizer</span>
                     <strong>
@@ -1214,9 +1162,26 @@ function App() {
                   </div>
                 </section>
 
+                {isAdmin ? (
+                  <section className="portal-panel">
+                  <h2>Event Registrations</h2>
+
+                    <div className="portal-info-row">
+                    <span>Registered attendees</span>
+                    <strong>
+                      {adminDashboard?.events?.find(
+                        (event) => String(event.id) === String(selectedEvent.id)
+                      )?.rsvpCount ?? 0}
+                    </strong>
+                    </div>
+
+                    <p className="portal-muted">
+                      Total students registered for this event.
+                    </p>
+                  </section>
+                ) : (
                 <section className="portal-panel">
                   <h2>Event RSVP</h2>
-
                   {isRsvpStatusLoading ? (
                     <p className="portal-muted">
                       Loading RSVP status...
@@ -1227,7 +1192,6 @@ function App() {
                         <span>Registered attendees</span>
                         <strong>{rsvpCount}</strong>
                       </div>
-
                       <div className="portal-info-row">
                         <span>Your RSVP status</span>
                         <strong
@@ -1242,7 +1206,6 @@ function App() {
                             : 'Not registered'}
                         </strong>
                       </div>
-
                       {eventUnavailable && !hasRsvp ? (
                         <p className="portal-alert portal-error">
                           RSVP is unavailable for this event.
@@ -1271,7 +1234,6 @@ function App() {
                       )}
                     </>
                   )}
-
                   {rsvpMessage && (
                     <p
                       className={`portal-alert ${
@@ -1285,7 +1247,55 @@ function App() {
                     </p>
                   )}
                 </section>
+                )}
               </div>
+            </>
+          ) : isAdmin && activePage === 'dashboard' ? (
+            <>
+              <div className="portal-welcome">
+                <div>
+                  <p className="portal-eyebrow">ADMINISTRATOR WORKSPACE</p>
+                  <h1>Admin Dashboard<span className="portal-welcome-dot">.</span></h1>
+                  <p>Manage your overview of campus events and registrations.</p>
+                </div>
+                <div className="portal-welcome-decoration" aria-hidden="true">✦</div>
+              </div>
+              {adminDashboardError && (
+                <p className="portal-alert portal-error" role="alert">{adminDashboardError}</p>
+              )}
+              <div className="portal-stats">
+                <div className="portal-stat">
+                  <span className="portal-stat-icon">▦</span>
+                  <div>
+                    <strong>{adminDashboard?.totalEvents ?? events.length}</strong>
+                    <span>Upcoming Events</span>
+                  </div>
+                </div>
+                <div className="portal-stat">
+                  <span className="portal-stat-icon">✓</span>
+                  <div>
+                    <strong>{adminDashboard?.totalRsvps ?? 0}</strong>
+                    <span>Total RSVPs</span>
+                  </div>
+                </div>
+                <div className="portal-stat">
+                  <span className="portal-stat-icon">◎</span>
+                  <div><strong>ADMIN</strong><span>Account Role</span></div>
+                </div>
+              </div>
+              <section className="portal-section">
+                <div className="portal-section-heading">
+                  <div><h2>Campus Events</h2><p>Events currently available on LMU Unified.</p></div>
+                  <button type="button" className="portal-text-btn" onClick={() => navigate('explore')}>
+                    View all →
+                  </button>
+                </div>
+                <div className="portal-event-grid">
+                  {(Array.isArray(adminDashboard?.events) && adminDashboard.events.length
+                    ? adminDashboard.events.map((entry) => entry.event || entry)
+                    : events).slice(0, 3).map((event) => renderEventCard(event))}
+                </div>
+              </section>
             </>
           ) : activePage === 'dashboard' ? (
             <>
@@ -1295,20 +1305,17 @@ function App() {
                   <p className="portal-eyebrow">
                     YOUR CAMPUS HUB
                   </p>
-
                   <h1>
                     Welcome back
                     <span className="portal-welcome-dot">
                       .
                     </span>
                   </h1>
-
                   <p>
                     Explore what's happening on campus
                     and stay connected with LMU.
                   </p>
                 </div>
-
                 <div
                   className="portal-welcome-decoration"
                   aria-hidden="true"
@@ -1316,13 +1323,11 @@ function App() {
                   ✦
                 </div>
               </div>
-
               {isStudentDashboardLoading && (
                 <p className="portal-muted">
                   Loading your dashboard...
                 </p>
               )}
-
               {studentDashboardError && (
                 <p
                   className="portal-alert portal-error"
@@ -1331,13 +1336,11 @@ function App() {
                   {studentDashboardError}
                 </p>
               )}
-
               <div className="portal-stats">
                 <div className="portal-stat">
                   <span className="portal-stat-icon">
                     ✓
                   </span>
-
                   <div>
                     <strong>
                       {registeredEvents.length}
@@ -1345,23 +1348,19 @@ function App() {
                     <span>My RSVPs</span>
                   </div>
                 </div>
-
                 <div className="portal-stat">
                   <span className="portal-stat-icon">
                     ▦
                   </span>
-
                   <div>
                     <strong>{events.length}</strong>
                     <span>Upcoming Events</span>
                   </div>
                 </div>
-
                 <div className="portal-stat">
                   <span className="portal-stat-icon">
                     ◎
                   </span>
-
                   <div>
                     <strong>
                       {studentDashboard?.role || 'Student'}
@@ -1370,7 +1369,6 @@ function App() {
                   </div>
                 </div>
               </div>
-
               {renderRegisteredSection(true)}
               {renderExploreSection(true)}
             </>
@@ -1381,33 +1379,27 @@ function App() {
                 <p className="portal-eyebrow">
                   DISCOVER LMU
                 </p>
-
                 <h1>Explore Events</h1>
-
                 <p>
                   Find events, connect with peers,
                   and make the most of campus life.
                 </p>
               </div>
-
               {renderExploreSection()}
             </>
-          ) : activePage === 'rsvps' ? (
+          ) : !isAdmin && activePage === 'rsvps' ? (
             <>
               {/* My RSVPs */}
               <div className="portal-page-heading">
                 <p className="portal-eyebrow">
                   YOUR CALENDAR
                 </p>
-
                 <h1>My RSVPs</h1>
-
                 <p>
                   Everything you've registered for,
                   all in one place.
                 </p>
               </div>
-
               {renderRegisteredSection()}
             </>
           ) : (
@@ -1417,42 +1409,34 @@ function App() {
                 <p className="portal-eyebrow">
                   ACCOUNT
                 </p>
-
                 <h1>My Profile</h1>
-
                 <p>
-                  Your LMU Unified student account.
+                  Your LMU Unified account.
                 </p>
               </div>
-
               <section className="portal-panel portal-profile">
                 <span className="portal-avatar portal-profile-avatar">
                   {(email || 'S')[0].toUpperCase()}
                 </span>
-
-                <h2>Student Account</h2>
-
+                <h2>{isAdmin ? 'Administrator Account' : 'Student Account'}</h2>
                 <div className="portal-info-row">
                   <span>Email</span>
                   <strong>
-                    {studentDashboard?.email || email}
+                    {(isAdmin ? adminDashboard?.email : studentDashboard?.email) || email}
                   </strong>
                 </div>
-
                 <div className="portal-info-row">
                   <span>Role</span>
                   <strong>
-                    {studentDashboard?.role || 'STUDENT'}
+                    {userRole || 'STUDENT'}
                   </strong>
                 </div>
-
                 <p className="portal-muted">
                   Profile details are read-only in this version.
                 </p>
               </section>
             </>
           )}
-
           <footer className="portal-footer">
             © {new Date().getFullYear()} LMU Unified ·
             Loyola Marymount University
@@ -1462,5 +1446,4 @@ function App() {
     </div>
   )
 }
-
 export default App

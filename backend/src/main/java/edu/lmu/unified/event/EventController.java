@@ -21,7 +21,7 @@ public class EventController {
                     1L,
                     "LMU Career Fair",
                     "Meet employers and explore career opportunities.",
-                    "2026-10-10",
+                    "2026-10-27",
                     "2:00 PM",
                     "Burns Recreation Center",
                     "Career",
@@ -33,7 +33,7 @@ public class EventController {
                     2L,
                     "Tech Club Meetup",
                     "Connect with students interested in technology and software development.",
-                    "2026-10-15",
+                    "2026-10-28",
                     "5:00 PM",
                     "University Hall",
                     "Technology",
@@ -45,7 +45,7 @@ public class EventController {
                     3L,
                     "LMU Movie Night",
                     "Enjoy a movie night with fellow LMU students.",
-                    "2026-10-18",
+                    "2026-10-29",
                     "7:00 PM",
                     "Sunken Garden",
                     "Entertainment",
@@ -53,6 +53,12 @@ public class EventController {
                     "ACTIVE"
             )
     );
+
+    // SCRUM-19 - Get all events for Student Dashboard
+    // Includes past and upcoming events
+    public List<Event> getAllEvents() {
+        return events;
+    }
 
     // SCRUM-15 - Browse upcoming events
     @GetMapping
