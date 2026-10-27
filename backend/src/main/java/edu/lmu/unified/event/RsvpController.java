@@ -1,7 +1,8 @@
 
 package edu.lmu.unified.event;
 
-import edu.lmu.unified.auth.SessionService;
+import edu.lmu.unified.auth.AuthorizationService;
+import edu.lmu.unified.auth.UserRole;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,18 +19,19 @@ public class RsvpController {
 
     private final RsvpService rsvpService;
     private final EventController eventController;
-    private final SessionService sessionService;
+    private final AuthorizationService authorizationService;
 
     public RsvpController(
             RsvpService rsvpService,
             EventController eventController,
-            SessionService sessionService
+            AuthorizationService authorizationService
     ) {
         this.rsvpService = rsvpService;
         this.eventController = eventController;
-        this.sessionService = sessionService;
+        this.authorizationService = authorizationService;
     }
 
+    // Register for an event - STUDENT only
     @PostMapping("/{eventId}/rsvp")
     public ResponseEntity<?> addRsvp(
             @PathVariable Long eventId,
@@ -38,10 +40,10 @@ public class RsvpController {
                     required = false
             ) String authorization
     ) {
-        Optional<String> email = authenticatedEmail(authorization);
+        Optional<String> email = authenticatedStudent(authorization);
 
         if (email.isEmpty()) {
-            return unauthorized();
+            return accessDenied(authorization);
         }
 
         Event event = findEvent(eventId);
@@ -79,6 +81,7 @@ public class RsvpController {
         ));
     }
 
+    // Cancel registration - STUDENT only
     @DeleteMapping("/{eventId}/rsvp")
     public ResponseEntity<?> cancelRsvp(
             @PathVariable Long eventId,
@@ -87,10 +90,10 @@ public class RsvpController {
                     required = false
             ) String authorization
     ) {
-        Optional<String> email = authenticatedEmail(authorization);
+        Optional<String> email = authenticatedStudent(authorization);
 
         if (email.isEmpty()) {
-            return unauthorized();
+            return accessDenied(authorization);
         }
 
         if (findEvent(eventId) == null) {
@@ -115,6 +118,7 @@ public class RsvpController {
         ));
     }
 
+    // Check RSVP status - STUDENT only
     @GetMapping("/{eventId}/rsvp")
     public ResponseEntity<?> getRsvpStatus(
             @PathVariable Long eventId,
@@ -123,10 +127,10 @@ public class RsvpController {
                     required = false
             ) String authorization
     ) {
-        Optional<String> email = authenticatedEmail(authorization);
+        Optional<String> email = authenticatedStudent(authorization);
 
         if (email.isEmpty()) {
-            return unauthorized();
+            return accessDenied(authorization);
         }
 
         if (findEvent(eventId) == null) {
@@ -139,28 +143,40 @@ public class RsvpController {
         ));
     }
 
-    private Optional<String> authenticatedEmail(
+    // Validate session and STUDENT role
+    private Optional<String> authenticatedStudent(
             String authorization
     ) {
-        if (authorization == null
-                || !authorization.startsWith("Bearer ")) {
+        if (!authorizationService.hasRole(
+                authorization,
+                UserRole.STUDENT
+        )) {
             return Optional.empty();
         }
 
-        String token = authorization.substring(7).trim();
-
-        if (token.isEmpty()) {
-            return Optional.empty();
-        }
-
-        return sessionService.getAuthenticatedEmail(token);
+        return authorizationService.getAuthenticatedEmail(
+                authorization
+        );
     }
 
-    private ResponseEntity<?> unauthorized() {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+    // Return 401 or 403 depending on authentication
+    private ResponseEntity<?> accessDenied(
+            String authorization
+    ) {
+        if (authorizationService
+                .getAuthenticatedEmail(authorization)
+                .isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of(
+                            "message",
+                            "Please log in to access your RSVP."
+                    ));
+        }
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(Map.of(
                         "message",
-                        "Please log in to access your RSVP."
+                        "Access denied. Student role required."
                 ));
     }
 
