@@ -12,13 +12,18 @@ import org.springframework.stereotype.Service;
 public class RoleService {
 
     private final Set<String> adminEmails;
+    private final Set<String> organizerEmails;
 
     public RoleService(
-            @Value("${lmu.admin.emails:}") String configuredEmails
+            @Value("${lmu.admin.emails:}") String configuredAdminEmails,
+            @Value("${lmu.organizer.emails:}") String configuredOrganizerEmails
     ) {
-        this.adminEmails = Arrays.stream(
-                        configuredEmails.split(",")
-                )
+        this.adminEmails = parseEmails(configuredAdminEmails);
+        this.organizerEmails = parseEmails(configuredOrganizerEmails);
+    }
+
+    private Set<String> parseEmails(String configuredEmails) {
+        return Arrays.stream(configuredEmails.split(","))
                 .map(email -> email.trim().toLowerCase())
                 .filter(email -> !email.isBlank())
                 .collect(Collectors.toUnmodifiableSet());
@@ -33,6 +38,10 @@ public class RoleService {
 
         if (adminEmails.contains(normalizedEmail)) {
             return UserRole.ADMIN;
+        }
+
+        if (organizerEmails.contains(normalizedEmail)) {
+            return UserRole.ORGANIZER;
         }
 
         return UserRole.STUDENT;

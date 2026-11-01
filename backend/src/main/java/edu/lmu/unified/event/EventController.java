@@ -10,13 +10,21 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/api/events")
 @CrossOrigin(origins = "http://localhost:5173")
 public class EventController {
 
-    private final List<Event> events = List.of(
+    private final EventRepository eventRepository;
+
+    public EventController(EventRepository eventRepository) {
+        this.eventRepository = eventRepository;
+    }
+
+    // Existing events from previous sprints.
+    private final List<Event> sampleEvents = List.of(
             new Event(
                     1L,
                     "LMU Career Fair",
@@ -54,16 +62,27 @@ public class EventController {
             )
     );
 
-    // SCRUM-19 - Get all events for Student Dashboard
-    // Includes past and upcoming events
-    public List<Event> getAllEvents() {
-        return events;
+    // Only approved, active events are publicly accessible.
+    private List<Event> getPublicEvents() {
+        return Stream.concat(
+                        sampleEvents.stream(),
+                        eventRepository.findAll().stream()
+                )
+                .filter(event ->
+                        "ACTIVE".equals(event.status())
+                )
+                .toList();
     }
 
-    // SCRUM-15 - Browse upcoming events
+    // SCRUM-19 - Events available to Student Dashboard.
+    public List<Event> getAllEvents() {
+        return getPublicEvents();
+    }
+
+    // SCRUM-15 - Browse upcoming approved events.
     @GetMapping
     public List<Event> getUpcomingEvents() {
-        return events.stream()
+        return getPublicEvents().stream()
                 .filter(event ->
                         !LocalDate.parse(event.date())
                                 .isBefore(LocalDate.now())
@@ -71,15 +90,17 @@ public class EventController {
                 .toList();
     }
 
-    // SCRUM-17 - Get details for one event
+    // SCRUM-17 - Public event details.
     @GetMapping("/{id}")
     public ResponseEntity<Event> getEventById(
             @PathVariable Long id
     ) {
-        return events.stream()
+        return getPublicEvents().stream()
                 .filter(event -> event.id().equals(id))
                 .findFirst()
                 .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElseGet(() ->
+                        ResponseEntity.notFound().build()
+                );
     }
 }
