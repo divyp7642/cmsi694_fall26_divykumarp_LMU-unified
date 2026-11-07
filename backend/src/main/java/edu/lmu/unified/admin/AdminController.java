@@ -5,6 +5,7 @@ import edu.lmu.unified.auth.AuthorizationService;
 import edu.lmu.unified.auth.UserRole;
 import edu.lmu.unified.event.Event;
 import edu.lmu.unified.event.EventController;
+import edu.lmu.unified.event.EventRepository;
 import edu.lmu.unified.event.RsvpService;
 
 import java.util.List;
@@ -23,15 +24,18 @@ public class AdminController {
     private final AuthorizationService authorizationService;
     private final EventController eventController;
     private final RsvpService rsvpService;
+    private final EventRepository eventRepository;
 
     public AdminController(
             AuthorizationService authorizationService,
             EventController eventController,
-            RsvpService rsvpService
+            RsvpService rsvpService,
+            EventRepository eventRepository
     ) {
         this.authorizationService = authorizationService;
         this.eventController = eventController;
         this.rsvpService = rsvpService;
+        this.eventRepository = eventRepository;
     }
 
     // SCRUM-20 - Administrator Dashboard
@@ -48,7 +52,6 @@ public class AdminController {
                         authorization
                 );
 
-        // User must be logged in
         if (email.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of(
@@ -56,7 +59,6 @@ public class AdminController {
                     ));
         }
 
-        // Only administrators can access this dashboard
         if (!authorizationService.hasRole(
                 authorization,
                 UserRole.ADMIN
@@ -68,11 +70,9 @@ public class AdminController {
                     ));
         }
 
-        // Reuse the existing upcoming events
         List<Event> upcomingEvents =
                 eventController.getUpcomingEvents();
 
-        // Include RSVP counts for every event
         List<Map<String, Object>> eventsWithRsvpCounts =
                 upcomingEvents.stream()
                         .map(event -> Map.<String, Object>of(
@@ -90,7 +90,6 @@ public class AdminController {
                         ))
                         .toList();
 
-        // Total registrations across upcoming events
         long totalRsvps = eventsWithRsvpCounts.stream()
                 .mapToLong(event ->
                         (Long) event.get("rsvpCount")
@@ -104,6 +103,204 @@ public class AdminController {
                 "totalEvents", upcomingEvents.size(),
                 "totalRsvps", totalRsvps,
                 "events", eventsWithRsvpCounts
+        ));
+    }
+
+    // SCRUM-23 - View pending events
+    @GetMapping("/events/pending")
+    public ResponseEntity<?> getPendingEvents(
+            @RequestHeader(
+                    value = "Authorization",
+                    required = false
+            ) String authorization
+    ) {
+
+        Optional<String> email =
+                authorizationService.getAuthenticatedEmail(
+                        authorization
+                );
+
+        if (email.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of(
+                            "message", "Please log in first."
+                    ));
+        }
+
+        if (!authorizationService.hasRole(
+                authorization,
+                UserRole.ADMIN
+        )) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of(
+                            "message",
+                            "Access denied. Administrator role required."
+                    ));
+        }
+
+        List<Event> pendingEvents =
+                eventRepository.findAll()
+                        .stream()
+                        .filter(event ->
+                                "PENDING_APPROVAL".equals(
+                                        event.status()
+                                )
+                        )
+                        .toList();
+
+        return ResponseEntity.ok(Map.of(
+                "message",
+                "Pending events retrieved successfully.",
+                "totalPending",
+                pendingEvents.size(),
+                "events",
+                pendingEvents
+        ));
+    }
+
+    // SCRUM-23 - Approve an event
+    @PutMapping("/events/{id}/approve")
+    public ResponseEntity<?> approveEvent(
+            @RequestHeader(
+                    value = "Authorization",
+                    required = false
+            ) String authorization,
+            @PathVariable Long id
+    ) {
+
+        Optional<String> email =
+                authorizationService.getAuthenticatedEmail(
+                        authorization
+                );
+
+        if (email.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of(
+                            "message", "Please log in first."
+                    ));
+        }
+
+        if (!authorizationService.hasRole(
+                authorization,
+                UserRole.ADMIN
+        )) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of(
+                            "message",
+                            "Access denied. Administrator role required."
+                    ));
+        }
+
+        Optional<Event> existingEvent =
+                eventRepository.findById(id);
+
+        if (existingEvent.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of(
+                            "message", "Event not found."
+                    ));
+        }
+
+        Event event = existingEvent.get();
+
+        if (!"PENDING_APPROVAL".equals(event.status())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of(
+                            "message",
+                            "Only pending events can be approved."
+                    ));
+        }
+
+        Event approvedEvent = new Event(
+                event.id(),
+                event.title(),
+                event.description(),
+                event.date(),
+                event.time(),
+                event.location(),
+                event.category(),
+                event.organizer(),
+                "APPROVED"
+        );
+
+        eventRepository.save(approvedEvent);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Event approved successfully.",
+                "event", approvedEvent
+        ));
+    }
+
+    // SCRUM-23 - Reject an event
+    @PutMapping("/events/{id}/reject")
+    public ResponseEntity<?> rejectEvent(
+            @RequestHeader(
+                    value = "Authorization",
+                    required = false
+            ) String authorization,
+            @PathVariable Long id
+    ) {
+
+        Optional<String> email =
+                authorizationService.getAuthenticatedEmail(
+                        authorization
+                );
+
+        if (email.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of(
+                            "message", "Please log in first."
+                    ));
+        }
+
+        if (!authorizationService.hasRole(
+                authorization,
+                UserRole.ADMIN
+        )) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of(
+                            "message",
+                            "Access denied. Administrator role required."
+                    ));
+        }
+
+        Optional<Event> existingEvent =
+                eventRepository.findById(id);
+
+        if (existingEvent.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of(
+                            "message", "Event not found."
+                    ));
+        }
+
+        Event event = existingEvent.get();
+
+        if (!"PENDING_APPROVAL".equals(event.status())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of(
+                            "message",
+                            "Only pending events can be rejected."
+                    ));
+        }
+
+        Event rejectedEvent = new Event(
+                event.id(),
+                event.title(),
+                event.description(),
+                event.date(),
+                event.time(),
+                event.location(),
+                event.category(),
+                event.organizer(),
+                "REJECTED"
+        );
+
+        eventRepository.save(rejectedEvent);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Event rejected successfully.",
+                "event", rejectedEvent
         ));
     }
 }

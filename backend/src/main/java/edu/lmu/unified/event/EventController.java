@@ -62,7 +62,7 @@ public class EventController {
             )
     );
 
-    // Only approved, active events are publicly accessible.
+    // SCRUM-23 - Only active or approved events are public.
     private List<Event> getPublicEvents() {
         return Stream.concat(
                         sampleEvents.stream(),
@@ -70,6 +70,7 @@ public class EventController {
                 )
                 .filter(event ->
                         "ACTIVE".equals(event.status())
+                                || "APPROVED".equals(event.status())
                 )
                 .toList();
     }
