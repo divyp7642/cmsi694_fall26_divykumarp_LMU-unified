@@ -7,6 +7,8 @@ import edu.lmu.unified.event.Event;
 import edu.lmu.unified.event.EventController;
 import edu.lmu.unified.event.EventRepository;
 import edu.lmu.unified.event.RsvpService;
+import edu.lmu.unified.notification.Notification;
+import edu.lmu.unified.notification.NotificationService;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +42,9 @@ class AdminControllerTest {
     @Mock
     private EventRepository eventRepository;
 
+    @Mock
+    private NotificationService notificationService;
+
     @InjectMocks
     private AdminController adminController;
 
@@ -59,6 +64,21 @@ class AdminControllerTest {
                 "Technology",
                 "organizer@lion.lmu.edu",
                 status
+        );
+    }
+
+    private Notification createNotification(
+            Event event
+    ) {
+        return new Notification(
+                "notification-" + event.id(),
+                event.id(),
+                event.title(),
+                event.organizer(),
+                event.status(),
+                "Your event status has been updated.",
+                "2026-11-06T12:00:00Z",
+                false
         );
     }
 
@@ -137,15 +157,22 @@ class AdminControllerTest {
         assertEquals(List.of(pending), body.get("events"));
     }
 
-    // Test 4 - Admin can approve a pending event.
+    // Test 4 - Admin approval generates a notification.
     @Test
     void shouldApprovePendingEvent() {
         mockAdmin();
 
         Event pending = createEvent(4L, "PENDING_APPROVAL");
+        Event expectedApproved = createEvent(4L, "APPROVED");
+        Notification notification =
+                createNotification(expectedApproved);
 
         when(eventRepository.findById(4L))
                 .thenReturn(Optional.of(pending));
+
+        when(notificationService.createDecisionNotification(
+                expectedApproved
+        )).thenReturn(notification);
 
         ResponseEntity<?> response =
                 adminController.approveEvent(TOKEN, 4L);
@@ -163,22 +190,36 @@ class AdminControllerTest {
         assertEquals(pending.organizer(), approved.organizer());
 
         assertEquals(
-                "Event approved successfully.",
+                "Event approved successfully. Organizer notified.",
                 body.get("message")
         );
 
+        assertEquals(
+                notification.id(),
+                body.get("notificationId")
+        );
+
         verify(eventRepository).save(approved);
+        verify(notificationService)
+                .createDecisionNotification(approved);
     }
 
-    // Test 5 - Admin can reject a pending event.
+    // Test 5 - Admin rejection generates a notification.
     @Test
     void shouldRejectPendingEvent() {
         mockAdmin();
 
         Event pending = createEvent(5L, "PENDING_APPROVAL");
+        Event expectedRejected = createEvent(5L, "REJECTED");
+        Notification notification =
+                createNotification(expectedRejected);
 
         when(eventRepository.findById(5L))
                 .thenReturn(Optional.of(pending));
+
+        when(notificationService.createDecisionNotification(
+                expectedRejected
+        )).thenReturn(notification);
 
         ResponseEntity<?> response =
                 adminController.rejectEvent(TOKEN, 5L);
@@ -195,11 +236,18 @@ class AdminControllerTest {
         assertEquals(pending.title(), rejected.title());
 
         assertEquals(
-                "Event rejected successfully.",
+                "Event rejected successfully. Organizer notified.",
                 body.get("message")
         );
 
+        assertEquals(
+                notification.id(),
+                body.get("notificationId")
+        );
+
         verify(eventRepository).save(rejected);
+        verify(notificationService)
+                .createDecisionNotification(rejected);
     }
 
     // Test 6 - Students cannot approve events.
@@ -215,7 +263,10 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verifyNoInteractions(eventRepository);
+        verifyNoInteractions(
+                eventRepository,
+                notificationService
+        );
     }
 
     // Test 7 - Students cannot reject events.
@@ -231,7 +282,10 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verifyNoInteractions(eventRepository);
+        verifyNoInteractions(
+                eventRepository,
+                notificationService
+        );
     }
 
     // Test 8 - Unauthenticated users cannot approve.
@@ -248,7 +302,10 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verifyNoInteractions(eventRepository);
+        verifyNoInteractions(
+                eventRepository,
+                notificationService
+        );
     }
 
     // Test 9 - Unauthenticated users cannot reject.
@@ -265,10 +322,13 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verifyNoInteractions(eventRepository);
+        verifyNoInteractions(
+                eventRepository,
+                notificationService
+        );
     }
 
-    // Test 10 - Approving a nonexistent event returns 404.
+    // Test 10 - Approving a missing event returns 404.
     @Test
     void shouldReturnNotFoundWhenApprovingMissingEvent() {
         mockAdmin();
@@ -284,10 +344,13 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verify(eventRepository, never()).save(any(Event.class));
+        verify(eventRepository, never())
+                .save(any(Event.class));
+
+        verifyNoInteractions(notificationService);
     }
 
-    // Test 11 - Rejecting a nonexistent event returns 404.
+    // Test 11 - Rejecting a missing event returns 404.
     @Test
     void shouldReturnNotFoundWhenRejectingMissingEvent() {
         mockAdmin();
@@ -303,10 +366,13 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verify(eventRepository, never()).save(any(Event.class));
+        verify(eventRepository, never())
+                .save(any(Event.class));
+
+        verifyNoInteractions(notificationService);
     }
 
-    // Test 12 - An already approved event cannot be approved again.
+    // Test 12 - An approved event cannot be approved again.
     @Test
     void shouldPreventApprovingAlreadyApprovedEvent() {
         mockAdmin();
@@ -324,7 +390,10 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verify(eventRepository, never()).save(any(Event.class));
+        verify(eventRepository, never())
+                .save(any(Event.class));
+
+        verifyNoInteractions(notificationService);
     }
 
     // Test 13 - A rejected event cannot be approved.
@@ -345,7 +414,10 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verify(eventRepository, never()).save(any(Event.class));
+        verify(eventRepository, never())
+                .save(any(Event.class));
+
+        verifyNoInteractions(notificationService);
     }
 
     // Test 14 - An approved event cannot be rejected.
@@ -366,7 +438,10 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verify(eventRepository, never()).save(any(Event.class));
+        verify(eventRepository, never())
+                .save(any(Event.class));
+
+        verifyNoInteractions(notificationService);
     }
 
     // Test 15 - A rejected event cannot be rejected again.
@@ -387,6 +462,9 @@ class AdminControllerTest {
                 response.getStatusCode()
         );
 
-        verify(eventRepository, never()).save(any(Event.class));
+        verify(eventRepository, never())
+                .save(any(Event.class));
+
+        verifyNoInteractions(notificationService);
     }
 }

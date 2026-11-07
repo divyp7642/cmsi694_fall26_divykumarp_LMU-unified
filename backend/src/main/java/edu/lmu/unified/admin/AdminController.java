@@ -7,6 +7,8 @@ import edu.lmu.unified.event.Event;
 import edu.lmu.unified.event.EventController;
 import edu.lmu.unified.event.EventRepository;
 import edu.lmu.unified.event.RsvpService;
+import edu.lmu.unified.notification.Notification;
+import edu.lmu.unified.notification.NotificationService;
 
 import java.util.List;
 import java.util.Map;
@@ -25,17 +27,20 @@ public class AdminController {
     private final EventController eventController;
     private final RsvpService rsvpService;
     private final EventRepository eventRepository;
+    private final NotificationService notificationService;
 
     public AdminController(
             AuthorizationService authorizationService,
             EventController eventController,
             RsvpService rsvpService,
-            EventRepository eventRepository
+            EventRepository eventRepository,
+            NotificationService notificationService
     ) {
         this.authorizationService = authorizationService;
         this.eventController = eventController;
         this.rsvpService = rsvpService;
         this.eventRepository = eventRepository;
+        this.notificationService = notificationService;
     }
 
     // SCRUM-20 - Administrator Dashboard
@@ -158,7 +163,7 @@ public class AdminController {
         ));
     }
 
-    // SCRUM-23 - Approve an event
+    // SCRUM-23/24 - Approve event and notify organizer.
     @PutMapping("/events/{id}/approve")
     public ResponseEntity<?> approveEvent(
             @RequestHeader(
@@ -225,13 +230,22 @@ public class AdminController {
 
         eventRepository.save(approvedEvent);
 
+        Notification notification =
+                notificationService.createDecisionNotification(
+                        approvedEvent
+                );
+
         return ResponseEntity.ok(Map.of(
-                "message", "Event approved successfully.",
-                "event", approvedEvent
+                "message",
+                "Event approved successfully. Organizer notified.",
+                "event",
+                approvedEvent,
+                "notificationId",
+                notification.id()
         ));
     }
 
-    // SCRUM-23 - Reject an event
+    // SCRUM-23/24 - Reject event and notify organizer.
     @PutMapping("/events/{id}/reject")
     public ResponseEntity<?> rejectEvent(
             @RequestHeader(
@@ -298,9 +312,18 @@ public class AdminController {
 
         eventRepository.save(rejectedEvent);
 
+        Notification notification =
+                notificationService.createDecisionNotification(
+                        rejectedEvent
+                );
+
         return ResponseEntity.ok(Map.of(
-                "message", "Event rejected successfully.",
-                "event", rejectedEvent
+                "message",
+                "Event rejected successfully. Organizer notified.",
+                "event",
+                rejectedEvent,
+                "notificationId",
+                notification.id()
         ));
     }
 }

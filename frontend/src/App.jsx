@@ -79,6 +79,15 @@ function App() {
   const [reviewMessageError, setReviewMessageError] = useState(false)
   const [reviewVersion, setReviewVersion] = useState(0)
 
+  // SCRUM-24 - Organizer notifications and submitted events
+  const [organizerEvents, setOrganizerEvents] = useState([])
+  const [organizerNotifications, setOrganizerNotifications] = useState([])
+  const [organizerDataLoading, setOrganizerDataLoading] = useState(false)
+  const [organizerDataError, setOrganizerDataError] = useState('')
+  const [organizerRefreshVersion, setOrganizerRefreshVersion] = useState(0)
+  const [notificationBusyId, setNotificationBusyId] = useState(null)
+  const [notificationReadError, setNotificationReadError] = useState('')
+
   // Navigation
   const [activePage, setActivePage] = useState('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -128,6 +137,13 @@ function App() {
     setOtpSent(false)
     setUserRole(null)
     setRoleError('')
+    setOrganizerEvents([])
+    setOrganizerNotifications([])
+    setOrganizerDataError('')
+    setOrganizerDataLoading(false)
+    setOrganizerRefreshVersion(0)
+    setNotificationBusyId(null)
+    setNotificationReadError('')
     setPendingEvents([])
     setPendingError('')
     setReviewEvent(null)
@@ -204,6 +220,60 @@ function App() {
       cancelled = true
     }
   }, [isAuthenticated])
+  // SCRUM-24 - Load data for the authenticated organizer only.
+  useEffect(() => {
+    if (!isAuthenticated || userRole !== 'ORGANIZER') return
+    let cancelled = false
+
+    async function loadOrganizerData() {
+      setOrganizerDataLoading(true)
+      setOrganizerDataError('')
+      try {
+        const [eventsResponse, notificationsResponse] = await Promise.all([
+          fetch(`${API_URL}/api/organizer/events`, { headers: getAuthHeaders() }),
+          fetch(`${API_URL}/api/organizer/notifications`, { headers: getAuthHeaders() }),
+        ])
+        if (cancelled) return
+        if (eventsResponse.status === 401 || notificationsResponse.status === 401) {
+          handleSessionExpired()
+          return
+        }
+        const [eventsData, notificationsData] = await Promise.all([
+          eventsResponse.json(),
+          notificationsResponse.json(),
+        ])
+        if (!eventsResponse.ok || !notificationsResponse.ok) {
+          throw new Error(
+            eventsData.message && !eventsResponse.ok
+              ? eventsData.message
+              : notificationsData.message || 'Unable to load organizer updates.'
+          )
+        }
+        if (!cancelled) {
+          setOrganizerEvents(Array.isArray(eventsData.events) ? eventsData.events : [])
+          setOrganizerNotifications(
+            Array.isArray(notificationsData.notifications) ? notificationsData.notifications : []
+          )
+        }
+      } catch (error) {
+        if (!cancelled) setOrganizerDataError(error.message || 'Unable to load organizer updates.')
+      } finally {
+        if (!cancelled) setOrganizerDataLoading(false)
+      }
+    }
+
+    loadOrganizerData()
+    return () => { cancelled = true }
+  }, [isAuthenticated, userRole, organizerRefreshVersion])
+
+  // Refresh decisions when the organizer returns to the browser tab.
+  useEffect(() => {
+    if (!isAuthenticated || userRole !== 'ORGANIZER') return
+    const refreshOnFocus = () => setOrganizerRefreshVersion((value) => value + 1)
+    window.addEventListener('focus', refreshOnFocus)
+    return () => window.removeEventListener('focus', refreshOnFocus)
+  }, [isAuthenticated, userRole])
+
   // Admin Dashboard
   useEffect(() => {
     if (!isAuthenticated || userRole !== 'ADMIN') return
@@ -735,6 +805,7 @@ function App() {
       )
       setEventSubmissionError(false)
       setEventForm({ ...emptyEventForm })
+      setOrganizerRefreshVersion((version) => version + 1)
       setEventFormErrors({})
     } catch {
       setEventSubmissionMessage(
@@ -1167,6 +1238,162 @@ function App() {
       </section>
     )
   }
+  // SCRUM-24 - Persist organizer notification read status in Redis.
+  async function handleMarkNotificationRead(notificationId = null) {
+    if (!isOrganizer || notificationBusyId !== null || organizerDataLoading) return
+
+    setNotificationBusyId(notificationId || 'all')
+    setNotificationReadError('')
+
+    try {
+      const path = notificationId
+        ? `/api/organizer/notifications/${encodeURIComponent(notificationId)}/read`
+        : '/api/organizer/notifications/read-all'
+
+      const response = await fetch(`${API_URL}${path}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      })
+
+      if (response.status === 401) {
+        handleSessionExpired()
+        return
+      }
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.message || 'Unable to mark notifications as read.')
+      }
+
+      setOrganizerNotifications((previous) => previous.map((item) =>
+        (!notificationId || item.id === notificationId)
+          ? { ...item, read: true }
+          : item
+      ))
+    } catch (error) {
+      setNotificationReadError(error.message || 'Unable to update notification.')
+    } finally {
+      setNotificationBusyId(null)
+    }
+  }
+
+  // SCRUM-24 - Organizer approval statuses and in-app notifications.
+  function renderOrganizerUpdates() {
+    const unreadCount = organizerNotifications.filter((item) => !item.read).length
+    const statusLabel = (status) => ({
+      PENDING_APPROVAL: 'Pending Approval',
+      APPROVED: 'Approved',
+      REJECTED: 'Rejected',
+    }[status] || status)
+    const statusColor = (status) => ({
+      PENDING_APPROVAL: '#a66a09',
+      APPROVED: '#18794e',
+      REJECTED: '#b42318',
+    }[status] || '#555')
+
+    return (
+      <>
+        <section className="portal-section">
+          <div className="portal-section-heading">
+            <div>
+              <h2>Notifications ({unreadCount} unread)</h2>
+              <p>Updates about administrator decisions on your events.</p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="portal-btn portal-btn-outline"
+                onClick={() => handleMarkNotificationRead()}
+                disabled={unreadCount === 0 || notificationBusyId !== null || organizerDataLoading}
+              >
+                {notificationBusyId === 'all' ? 'Marking...' : 'Mark All as Read'}
+              </button>
+              <button type="button" className="portal-btn portal-btn-outline"
+                onClick={() => setOrganizerRefreshVersion((value) => value + 1)}
+                disabled={organizerDataLoading || notificationBusyId !== null}>
+                {organizerDataLoading ? 'Refreshing...' : 'Refresh Updates'}
+              </button>
+            </div>
+          </div>
+          {notificationReadError && (
+            <p className="portal-alert portal-error" role="alert">{notificationReadError}</p>
+          )}
+          {organizerDataError && (
+            <p className="portal-alert portal-error" role="alert">{organizerDataError}</p>
+          )}
+          {organizerDataLoading && <p className="portal-muted">Loading your updates...</p>}
+          {!organizerDataLoading && !organizerDataError && organizerNotifications.length === 0 && (
+            <div className="portal-empty">
+              <h3>No notifications yet</h3>
+              <p>You'll see a message here when an administrator reviews your event.</p>
+            </div>
+          )}
+          {!organizerDataError && organizerNotifications.map((notification) => (
+            <article className="portal-panel" key={notification.id} style={{ marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                <strong>{notification.eventTitle}</strong>
+                <span style={{ color: statusColor(notification.decision), fontWeight: 700 }}>
+                  {statusLabel(notification.decision)}
+                </span>
+              </div>
+              <p className="portal-muted">{notification.message}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <small style={{ fontWeight: 700 }}>
+                  {notification.read ? 'Read' : 'Unread'}
+                </small>
+                {!notification.read && (
+                  <button
+                    type="button"
+                    className="portal-btn portal-btn-outline"
+                    onClick={() => handleMarkNotificationRead(notification.id)}
+                    disabled={notificationBusyId !== null || organizerDataLoading}
+                  >
+                    {notificationBusyId === notification.id ? 'Marking...' : 'Mark as Read'}
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </section>
+        <section className="portal-section">
+          <div className="portal-section-heading">
+            <div>
+              <h2>My Submitted Events ({organizerEvents.length})</h2>
+              <p>Track each event's current approval status.</p>
+            </div>
+          </div>
+          {!organizerDataLoading && !organizerDataError && organizerEvents.length === 0 && (
+            <div className="portal-empty">
+              <h3>No submitted events yet</h3>
+              <p>Submit an event using the form above to see it here.</p>
+            </div>
+          )}
+          {!organizerDataError && organizerEvents.length > 0 && (
+            <div className="portal-event-grid">
+              {organizerEvents.map((event) => (
+                <article className="portal-event-card" key={event.id}>
+                  <div className="portal-event-card-top">
+                    <span className="portal-category">{event.category}</span>
+                    <span style={{ color: statusColor(event.status), fontWeight: 700 }}>
+                      {statusLabel(event.status)}
+                    </span>
+                  </div>
+                  <h3>{event.title}</h3>
+                  <p className="portal-event-description">{event.description}</p>
+                  <div className="portal-event-meta">
+                    <span>▦ &nbsp;{event.date}</span>
+                    <span>◷ &nbsp;{event.time}</span>
+                    <span>⌖ &nbsp;{event.location}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </>
+    )
+  }
+
   // Login screen
   if (!isAuthenticated) {
     return (
@@ -1766,6 +1993,7 @@ function App() {
                 </div>
               </div>
               {renderOrganizerEventForm()}
+              {renderOrganizerUpdates()}
               {renderExploreSection(true)}
             </>
           ) : activePage === 'dashboard' ? (
