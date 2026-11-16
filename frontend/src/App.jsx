@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from 'react'
 import './App.css'
+import RoomReservationForm from './RoomReservationForm.jsx'
 const API_URL = 'http://localhost:8080'
 const navigation = [
   { id: 'dashboard', icon: '◫', label: 'Dashboard' },
@@ -91,9 +92,15 @@ function App() {
   // Navigation
   const [activePage, setActivePage] = useState('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const currentNavigation = isStudent
-    ? navigation
-    : navigation.filter((item) => item.id !== 'rsvps')
+  const currentNavigation = isOrganizer
+    ? [
+        ...navigation.filter((item) => item.id !== 'rsvps' && item.id !== 'profile'),
+        { id: 'reserve-room', icon: '▣', label: 'Reserve Room' },
+        ...navigation.filter((item) => item.id === 'profile'),
+      ]
+    : isStudent
+      ? navigation
+      : navigation.filter((item) => item.id !== 'rsvps')
   // Events
   const [events, setEvents] = useState([])
   const [eventsError, setEventsError] = useState('')
@@ -1966,6 +1973,28 @@ function App() {
                     )}
                 </div>
               </section>
+            </>
+          ) : isOrganizer && activePage === 'reserve-room' ? (
+            <>
+              <div className="portal-page-heading">
+                <h1>Reserve Room</h1>
+                <p>Reserve a campus room for an approved event.</p>
+              </div>
+              {organizerDataError ? (
+                <p className="portal-alert portal-error" role="alert">
+                  {organizerDataError}
+                </p>
+              ) : organizerDataLoading && organizerEvents.length === 0 ? (
+                <p className="portal-muted">Loading your approved events...</p>
+              ) : (
+                <RoomReservationForm
+                  token={sessionStorage.getItem('lmuToken') || ''}
+                  approvedEvents={organizerEvents.filter((event) => event.status === 'APPROVED')}
+                  events={organizerEvents.filter((event) => event.status === 'APPROVED')}
+                  organizerEvents={organizerEvents.filter((event) => event.status === 'APPROVED')}
+                  onSessionExpired={handleSessionExpired}
+                />
+              )}
             </>
           ) : isOrganizer && activePage === 'dashboard' ? (
             <>
