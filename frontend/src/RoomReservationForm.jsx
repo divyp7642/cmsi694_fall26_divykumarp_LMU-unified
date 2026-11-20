@@ -1,7 +1,17 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API_BASE_URL = "http://localhost:8080";
+
+function getMinimumDate() {
+  const today = new Date();
+
+  return (
+    `${today.getFullYear()}-` +
+    `${String(today.getMonth() + 1).padStart(2, "0")}-` +
+    `${String(today.getDate()).padStart(2, "0")}`
+  );
+}
 
 function RoomReservationForm({
   token,
@@ -16,37 +26,83 @@ function RoomReservationForm({
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
 
-  const [loadingRooms, setLoadingRooms] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [loadingRooms, setLoadingRooms] = useState(false);
+  const [availabilityChecked, setAvailabilityChecked] =
+    useState(false);
 
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [reservation, setReservation] = useState(null);
 
-  // Only approved events can reserve rooms.
+  // Prevent outdated availability responses from
+  // overwriting the latest selection.
+  const availabilityRequestRef = useRef(0);
+
+  // Track whether a successful reservation needs
+  // an availability refresh after the user changes inputs.
+  const reservationRef = useRef(null);
+
   const approvedEvents = events.filter(
     (event) => event.status === "APPROVED"
   );
 
-  // Get today's date using the local timezone.
-  const today = new Date();
-  const minimumDate =
-    `${today.getFullYear()}-` +
-    `${String(today.getMonth() + 1).padStart(2, "0")}-` +
-    `${String(today.getDate()).padStart(2, "0")}`;
+  const minimumDate = getMinimumDate();
 
-  // Retrieve the campus room catalog.
+  const selectedRoom = rooms.find(
+    (room) => String(room.id) === roomId
+  );
+
+  const validTimeRange =
+    Boolean(date && startTime && endTime) &&
+    date >= minimumDate &&
+    startTime < endTime;
+
+  function clearMessages() {
+    setError("");
+    setSuccess("");
+    setReservation(null);
+    reservationRef.current = null;
+  }
+
+  function handleEventChange(event) {
+    const selectedId = event.target.value;
+
+    setEventId(selectedId);
+    clearMessages();
+
+    const selectedEvent = approvedEvents.find(
+      (item) => String(item.id) === selectedId
+    );
+
+    setDate(selectedEvent?.date || "");
+  }
+
+  // Automatically retrieve available rooms whenever
+  // the selected date/time changes or a refresh is requested.
   useEffect(() => {
     const controller = new AbortController();
 
-    async function loadRooms() {
+    const requestId =
+      ++availabilityRequestRef.current;
+
+    async function loadAvailableRooms() {
       setLoadingRooms(true);
-      setError("");
+      setAvailabilityChecked(false);
       setRooms([]);
+      setRoomId("");
 
       try {
+        const params = new URLSearchParams({
+          date,
+          startTime,
+          endTime,
+        });
+
         const response = await fetch(
-          `${API_BASE_URL}/api/organizer/rooms`,
+          `${API_BASE_URL}/api/organizer/rooms/available?${params}`,
           {
             method: "GET",
             headers: {
@@ -60,68 +116,76 @@ function RoomReservationForm({
 
         if (!response.ok) {
           throw new Error(
-            data.message || "Unable to retrieve campus rooms."
+            data.message ||
+              "Unable to check room availability."
           );
         }
 
-        setRooms(data.rooms || []);
+        if (
+          !controller.signal.aborted &&
+          requestId === availabilityRequestRef.current
+        ) {
+          setRooms(data.rooms || []);
+          setAvailabilityChecked(true);
+        }
       } catch (err) {
-        if (err.name !== "AbortError") {
+        if (
+          !controller.signal.aborted &&
+          requestId === availabilityRequestRef.current
+        ) {
+          setRooms([]);
+          setAvailabilityChecked(false);
+
           setError(
-            err.message || "Unable to connect to the server."
+            err.message ||
+              "Unable to connect to the server."
           );
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (
+          !controller.signal.aborted &&
+          requestId === availabilityRequestRef.current
+        ) {
           setLoadingRooms(false);
         }
       }
     }
 
-    if (token) {
-      loadRooms();
-    } else {
-      setLoadingRooms(false);
+    if (!token || !validTimeRange) {
       setRooms([]);
-      setError("Please log in first.");
+      setRoomId("");
+      setAvailabilityChecked(false);
+      setLoadingRooms(false);
+
+      return () => controller.abort();
     }
+
+    // Keep successful reservation confirmation visible
+    // until the organizer changes the form.
+    if (reservationRef.current) {
+      setLoadingRooms(false);
+      return () => controller.abort();
+    }
+
+    loadAvailableRooms();
 
     return () => controller.abort();
-  }, [token]);
+  }, [
+    token,
+    date,
+    startTime,
+    endTime,
+    validTimeRange,
+    refreshKey,
+  ]);
 
-  const selectedRoom = rooms.find(
-    (room) => String(room.id) === roomId
-  );
-
-  // Clear old messages when the organizer changes the form.
-  function clearMessages() {
-    setError("");
-    setSuccess("");
-    setReservation(null);
-  }
-
-  function handleEventChange(event) {
-    const selectedId = event.target.value;
-
-    setEventId(selectedId);
-    clearMessages();
-
-    const selectedEvent = approvedEvents.find(
-      (item) => String(item.id) === selectedId
-    );
-
-    if (selectedEvent?.date) {
-      setDate(selectedEvent.date);
-    } else {
-      setDate("");
-    }
-  }
-
-  // Submit the reservation request.
+  // Submit a room reservation.
   async function handleSubmit(event) {
     event.preventDefault();
 
-    clearMessages();
+    setError("");
+    setSuccess("");
+    setReservation(null);
 
     if (!token) {
       setError("Please log in first.");
@@ -148,18 +212,24 @@ function RoomReservationForm({
       return;
     }
 
-    if (!selectedRoom) {
-      setError("Please select a valid campus room.");
-      return;
-    }
-
-    if (date < minimumDate) {
+    if (date < getMinimumDate()) {
       setError("Reservation date cannot be in the past.");
       return;
     }
 
     if (startTime >= endTime) {
       setError("End time must be after start time.");
+      return;
+    }
+
+    if (
+      !availabilityChecked ||
+      !selectedRoom ||
+      loadingRooms
+    ) {
+      setError(
+        "Please select an available campus room."
+      );
       return;
     }
 
@@ -195,6 +265,16 @@ function RoomReservationForm({
               "Please choose another room or time."
         );
 
+        // Clear the outdated room selection.
+        setRooms([]);
+        setRoomId("");
+        setAvailabilityChecked(false);
+
+        // Trigger another availability API request
+        // without requiring the organizer to change
+        // the date or time.
+        setRefreshKey((previous) => previous + 1);
+
         return;
       }
 
@@ -203,6 +283,8 @@ function RoomReservationForm({
           data.message || "Unable to complete reservation."
         );
       }
+
+      reservationRef.current = data.reservation;
 
       setSuccess(
         data.message || "Room reserved successfully."
@@ -229,8 +311,8 @@ function RoomReservationForm({
           <h2>Reserve a Campus Room</h2>
 
           <p>
-            Select an approved event, campus room,
-            and reservation time.
+            Select an approved event, choose a date and
+            time, and view available campus rooms.
           </p>
         </div>
       </div>
@@ -278,53 +360,6 @@ function RoomReservationForm({
                 ))}
               </select>
             </div>
-
-            <div className="room-form-field">
-              <label htmlFor="reservation-room">
-                Campus Room
-              </label>
-
-              <select
-                id="reservation-room"
-                value={roomId}
-                onChange={(event) => {
-                  setRoomId(event.target.value);
-                  clearMessages();
-                }}
-                disabled={loadingRooms || submitting}
-                required
-              >
-                <option value="">
-                  {loadingRooms
-                    ? "Loading campus rooms..."
-                    : "Select a campus room"}
-                </option>
-
-                {rooms.map((room) => (
-                  <option
-                    key={room.id}
-                    value={room.id}
-                  >
-                    {room.name} — {room.location}
-                    {" "}({room.capacity} seats)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedRoom && (
-              <div className="room-selection-details">
-                <strong>{selectedRoom.name}</strong>
-
-                <span>
-                  Location: {selectedRoom.location}
-                </span>
-
-                <span>
-                  Seating capacity: {selectedRoom.capacity}
-                </span>
-              </div>
-            )}
 
             <div className="room-form-field">
               <label htmlFor="reservation-date">
@@ -383,6 +418,109 @@ function RoomReservationForm({
               </div>
             </div>
 
+            <div className="room-form-field">
+              <label htmlFor="reservation-room">
+                Available Campus Rooms
+              </label>
+
+              <select
+                id="reservation-room"
+                value={roomId}
+                onChange={(event) => {
+                  setRoomId(event.target.value);
+                  clearMessages();
+                }}
+                disabled={
+                  !validTimeRange ||
+                  loadingRooms ||
+                  !availabilityChecked ||
+                  rooms.length === 0 ||
+                  submitting ||
+                  Boolean(reservation)
+                }
+                required
+              >
+                <option value="">
+                  {loadingRooms
+                    ? "Checking room availability..."
+                    : !validTimeRange
+                      ? "Select a valid date and time first"
+                      : !availabilityChecked
+                        ? "Availability not yet checked"
+                        : rooms.length === 0
+                          ? "No rooms available"
+                          : "Select an available room"}
+                </option>
+
+                {rooms.map((room) => (
+                  <option
+                    key={room.id}
+                    value={room.id}
+                  >
+                    {room.name} — {room.location}
+                    {" "}({room.capacity} seats)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {validTimeRange &&
+              availabilityChecked &&
+              !loadingRooms && (
+                <div
+                  className="room-selection-details"
+                  role="status"
+                >
+                  <strong>
+                    {rooms.length === 0
+                      ? "No rooms available"
+                      : `${rooms.length} available room${
+                          rooms.length === 1 ? "" : "s"
+                        } found`}
+                  </strong>
+
+                  <span>
+                    {rooms.length === 0
+                      ? "Try another date or time range."
+                      : "Choose a room from the list above."}
+                  </span>
+                </div>
+              )}
+
+            {selectedRoom && (
+              <div className="room-selection-details">
+                <strong>{selectedRoom.name}</strong>
+
+                <span>
+                  Location: {selectedRoom.location}
+                </span>
+
+                <span>
+                  Seating capacity: {selectedRoom.capacity}
+                </span>
+              </div>
+            )}
+
+            {date && date < minimumDate && (
+              <div
+                className="portal-alert portal-error"
+                role="alert"
+              >
+                Reservation date cannot be in the past.
+              </div>
+            )}
+
+            {startTime &&
+              endTime &&
+              startTime >= endTime && (
+                <div
+                  className="portal-alert portal-error"
+                  role="alert"
+                >
+                  End time must be after start time.
+                </div>
+              )}
+
             {error && (
               <div
                 className="portal-alert portal-error"
@@ -431,12 +569,14 @@ function RoomReservationForm({
               disabled={
                 submitting ||
                 loadingRooms ||
+                !availabilityChecked ||
+                !roomId ||
                 rooms.length === 0 ||
                 Boolean(reservation)
               }
             >
               {submitting
-                ? "Checking Availability..."
+                ? "Reserving Room..."
                 : reservation
                   ? "Room Reserved"
                   : "Reserve Room"}
