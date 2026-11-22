@@ -1,3 +1,4 @@
+
 package edu.lmu.unified.room;
 
 import edu.lmu.unified.auth.AuthorizationService;
@@ -7,6 +8,8 @@ import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -29,7 +32,7 @@ public class RoomReservationController {
         this.reservationService = reservationService;
     }
 
-    // SCRUM-27 - Reserve a room without scheduling conflicts.
+    // SCRUM-26 - Reserve a room for an approved event.
     @PostMapping
     public ResponseEntity<?> reserveRoom(
             @RequestHeader(
@@ -47,7 +50,6 @@ public class RoomReservationController {
                 );
 
         if (email.isEmpty()) {
-
             return ResponseEntity
                     .status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of(
@@ -61,7 +63,6 @@ public class RoomReservationController {
                 authorization,
                 UserRole.ORGANIZER
         )) {
-
             return ResponseEntity
                     .status(HttpStatus.FORBIDDEN)
                     .body(Map.of(
@@ -71,7 +72,6 @@ public class RoomReservationController {
         }
 
         try {
-
             RoomReservation reservation =
                     reservationService.reserveRoom(
                             request,
@@ -101,5 +101,27 @@ public class RoomReservationController {
                             message
                     ));
         }
+    }
+
+    // Return clear messages for invalid reservation fields.
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, String>>
+            handleValidationException(
+                    MethodArgumentNotValidException exception
+            ) {
+
+        String message = exception
+                .getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(FieldError::getDefaultMessage)
+                .filter(value -> value != null
+                        && !value.isBlank())
+                .findFirst()
+                .orElse("Please provide valid reservation information.");
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", message));
     }
 }
