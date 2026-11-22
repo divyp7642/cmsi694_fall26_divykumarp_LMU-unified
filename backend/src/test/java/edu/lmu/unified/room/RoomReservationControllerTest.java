@@ -1,3 +1,4 @@
+
 package edu.lmu.unified.room;
 
 import edu.lmu.unified.auth.AuthorizationService;
@@ -7,22 +8,36 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.FieldError;
+
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
 class RoomReservationControllerTest {
 
     private AuthorizationService authorizationService;
     private RoomReservationService reservationService;
     private RoomReservationController controller;
+    private MockMvc mockMvc;
 
     private final String token = "Bearer test-token";
 
@@ -46,8 +61,13 @@ class RoomReservationControllerTest {
                         reservationService
                 );
 
-        reservationDate =
-                LocalDate.now().plusDays(5);
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(controller)
+                .build();
+
+        reservationDate = LocalDate.now(
+                ZoneId.of("America/Los_Angeles")
+        ).plusDays(5);
     }
 
     private CreateRoomReservationRequest createRequest() {
@@ -87,6 +107,35 @@ class RoomReservationControllerTest {
                 token,
                 UserRole.ORGANIZER
         )).thenReturn(true);
+    }
+
+    private MethodArgumentNotValidException
+            createValidationException(
+                    String field,
+                    String message
+            ) {
+
+        CreateRoomReservationRequest request =
+                createRequest();
+
+        BeanPropertyBindingResult bindingResult =
+                new BeanPropertyBindingResult(
+                        request,
+                        "request"
+                );
+
+        bindingResult.addError(
+                new FieldError(
+                        "request",
+                        field,
+                        message
+                )
+        );
+
+        return new MethodArgumentNotValidException(
+                null,
+                bindingResult
+        );
     }
 
     @Test
@@ -395,5 +444,231 @@ class RoomReservationControllerTest {
                 "You can only reserve rooms for your own events.",
                 body.get("message")
         );
+    }
+
+    // SCRUM-26: Direct validation-handler tests.
+
+    @Test
+    void shouldReturnBadRequestForMissingRoomId() {
+
+        MethodArgumentNotValidException exception =
+                createValidationException(
+                        "roomId",
+                        "Room ID is required"
+                );
+
+        ResponseEntity<Map<String, String>> response =
+                controller.handleValidationException(
+                        exception
+                );
+
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                response.getStatusCode()
+        );
+
+        assertNotNull(response.getBody());
+
+        assertEquals(
+                "Room ID is required",
+                response.getBody().get("message")
+        );
+    }
+
+    @Test
+    void shouldReturnBadRequestForMissingEventId() {
+
+        MethodArgumentNotValidException exception =
+                createValidationException(
+                        "eventId",
+                        "Event ID is required"
+                );
+
+        ResponseEntity<Map<String, String>> response =
+                controller.handleValidationException(
+                        exception
+                );
+
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                response.getStatusCode()
+        );
+
+        assertNotNull(response.getBody());
+
+        assertEquals(
+                "Event ID is required",
+                response.getBody().get("message")
+        );
+    }
+
+    @Test
+    void shouldReturnBadRequestForInvalidRoomId() {
+
+        MethodArgumentNotValidException exception =
+                createValidationException(
+                        "roomId",
+                        "Room ID must be positive"
+                );
+
+        ResponseEntity<Map<String, String>> response =
+                controller.handleValidationException(
+                        exception
+                );
+
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                response.getStatusCode()
+        );
+
+        assertNotNull(response.getBody());
+
+        assertEquals(
+                "Room ID must be positive",
+                response.getBody().get("message")
+        );
+    }
+
+    @Test
+    void shouldReturnBadRequestForMissingStartTime() {
+
+        MethodArgumentNotValidException exception =
+                createValidationException(
+                        "startTime",
+                        "Start time is required"
+                );
+
+        ResponseEntity<Map<String, String>> response =
+                controller.handleValidationException(
+                        exception
+                );
+
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                response.getStatusCode()
+        );
+
+        assertNotNull(response.getBody());
+
+        assertEquals(
+                "Start time is required",
+                response.getBody().get("message")
+        );
+    }
+
+    @Test
+    void shouldReturnFallbackMessageForValidationError() {
+
+        MethodArgumentNotValidException exception =
+                createValidationException(
+                        "roomId",
+                        ""
+                );
+
+        ResponseEntity<Map<String, String>> response =
+                controller.handleValidationException(
+                        exception
+                );
+
+        assertEquals(
+                HttpStatus.BAD_REQUEST,
+                response.getStatusCode()
+        );
+
+        assertNotNull(response.getBody());
+
+        assertEquals(
+                "Please provide valid reservation information.",
+                response.getBody().get("message")
+        );
+    }
+
+    // SCRUM-26: HTTP-level validation tests.
+    // MockMvc sends requests through Spring MVC,
+    // including JSON binding and @Valid processing.
+
+    @Test
+    void shouldRejectMissingRoomIdThroughHttp()
+            throws Exception {
+
+        String json = """
+                {
+                  "eventId": 5,
+                  "date": "%s",
+                  "startTime": "10:00",
+                  "endTime": "12:00"
+                }
+                """.formatted(reservationDate);
+
+        mockMvc.perform(
+                post("/api/organizer/room-reservations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", token)
+                        .content(json)
+        )
+        .andExpect(status().isBadRequest())
+        .andExpect(
+                jsonPath("$.message")
+                        .value("Room ID is required")
+        );
+
+        verifyNoInteractions(reservationService);
+    }
+
+    @Test
+    void shouldRejectInvalidRoomIdThroughHttp()
+            throws Exception {
+
+        String json = """
+                {
+                  "roomId": -1,
+                  "eventId": 5,
+                  "date": "%s",
+                  "startTime": "10:00",
+                  "endTime": "12:00"
+                }
+                """.formatted(reservationDate);
+
+        mockMvc.perform(
+                post("/api/organizer/room-reservations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", token)
+                        .content(json)
+        )
+        .andExpect(status().isBadRequest())
+        .andExpect(
+                jsonPath("$.message")
+                        .value("Room ID must be positive")
+        );
+
+        verifyNoInteractions(reservationService);
+    }
+
+    @Test
+    void shouldRejectMissingStartTimeThroughHttp()
+            throws Exception {
+
+        String json = """
+                {
+                  "roomId": 101,
+                  "eventId": 5,
+                  "date": "%s",
+                  "endTime": "12:00"
+                }
+                """.formatted(reservationDate);
+
+        mockMvc.perform(
+                post("/api/organizer/room-reservations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", token)
+                        .content(json)
+        )
+        .andExpect(status().isBadRequest())
+        .andExpect(
+                jsonPath("$.message")
+                        .value("Start time is required")
+        );
+
+        verifyNoInteractions(reservationService);
     }
 }
