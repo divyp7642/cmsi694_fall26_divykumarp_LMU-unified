@@ -1,5 +1,4 @@
-
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import RoomReservationForm from './RoomReservationForm.jsx'
 const API_URL = 'http://localhost:8080'
@@ -106,6 +105,14 @@ function App() {
   const [eventsError, setEventsError] = useState('')
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [isDetailsLoading, setIsDetailsLoading] = useState(false)
+  // SCRUM-28 - Account-specific saved events
+  const [savedEventIds, setSavedEventIds] = useState([])
+  const [savedEventsReady, setSavedEventsReady] = useState(false)
+  const [savedEventsLoadError, setSavedEventsLoadError] = useState('')
+  const [savedEventsVersion, setSavedEventsVersion] = useState(0)
+  const [savedEventBusyId, setSavedEventBusyId] = useState(null)
+  const [savedEventFeedback, setSavedEventFeedback] = useState(null)
+  const savedRequestRef = useRef(null)
   // Search and filters
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
@@ -163,6 +170,13 @@ function App() {
     setRegisteredEvents([])
     setRegisteredEventsError('')
     setRegistrationVersion(0)
+    savedRequestRef.current = null
+    setSavedEventIds([])
+    setSavedEventsReady(false)
+    setSavedEventsLoadError('')
+    setSavedEventsVersion(0)
+    setSavedEventBusyId(null)
+    setSavedEventFeedback(null)
     setEvents([])
     setEventsError('')
     setSelectedEvent(null)
@@ -452,6 +466,112 @@ function App() {
       cancelled = true
     }
   }, [isAuthenticated, userRole, registrationVersion])
+  // SCRUM-28 - Restore saved events after login or refresh.
+  useEffect(() => {
+    if (!isAuthenticated || userRole !== 'STUDENT') return
+    let cancelled = false
+    const token = sessionStorage.getItem('lmuToken')
+    const isCurrent = () => !cancelled && sessionStorage.getItem('lmuToken') === token
+    async function loadSavedEvents() {
+      setSavedEventsReady(false)
+      setSavedEventsLoadError('')
+      try {
+        const response = await fetch(`${API_URL}/api/student/saved-events/ids`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!isCurrent()) return
+        if (response.status === 401) {
+          handleSessionExpired()
+          return
+        }
+        if (!response.ok) throw new Error('Unable to load saved events.')
+        const data = await response.json()
+        if (!Array.isArray(data)) throw new Error('Invalid saved events response.')
+        if (isCurrent()) {
+          setSavedEventIds(data.map(String))
+          setSavedEventsReady(true)
+        }
+      } catch (error) {
+        if (isCurrent()) setSavedEventsLoadError(error.message || 'Unable to load saved events.')
+      }
+    }
+    loadSavedEvents()
+    return () => { cancelled = true }
+  }, [isAuthenticated, userRole, savedEventsVersion])
+
+  // SCRUM-28 - Save or remove an event for the current student.
+  async function handleToggleSavedEvent(eventId) {
+    if (!isStudent || !savedEventsReady || savedRequestRef.current) return
+    const token = sessionStorage.getItem('lmuToken')
+    if (!token) return
+    const id = String(eventId)
+    const request = {}
+    savedRequestRef.current = request
+    const isCurrent = () => savedRequestRef.current === request && sessionStorage.getItem('lmuToken') === token
+    setSavedEventBusyId(id)
+    setSavedEventFeedback(null)
+    try {
+      const response = await fetch(`${API_URL}/api/student/saved-events/${encodeURIComponent(id)}`, {
+        method: savedEventIds.includes(id) ? 'DELETE' : 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!isCurrent()) return
+      if (response.status === 401) {
+        handleSessionExpired()
+        return
+      }
+      const data = await response.json()
+      if (!isCurrent()) return
+      if (!response.ok) throw new Error(data.message || 'Unable to update saved event.')
+      if (typeof data.saved !== 'boolean') throw new Error('Invalid saved event response.')
+      setSavedEventIds((previous) => data.saved
+        ? [...new Set([...previous, id])]
+        : previous.filter((value) => value !== id))
+      setSavedEventFeedback({ id, message: data.message || 'Saved events updated.', error: false })
+    } catch (error) {
+      if (isCurrent()) setSavedEventFeedback({ id, message: error.message || 'Unable to update saved event.', error: true })
+    } finally {
+      if (isCurrent()) {
+        savedRequestRef.current = null
+        setSavedEventBusyId(null)
+      }
+    }
+  }
+
+  function renderSavedEventControl(event) {
+    if (!isStudent) return null
+    const id = String(event.id)
+    const saved = savedEventIds.includes(id)
+    const feedback = savedEventFeedback?.id === id ? savedEventFeedback : null
+    return (
+      <>
+        <button
+          type="button"
+          className={`portal-btn ${saved ? 'portal-btn-outline' : ''}`}
+          disabled={!savedEventsReady || savedEventBusyId !== null}
+          onClick={() => handleToggleSavedEvent(event.id)}
+          aria-label={`${saved ? 'Remove saved event' : 'Save event'}: ${event.title}`}
+        >
+          {savedEventBusyId === id ? 'Processing...' : saved ? 'Remove Saved Event' : 'Save Event'}
+        </button>
+        {savedEventsLoadError ? (
+          <>
+            <p className="portal-alert portal-error" role="alert">{savedEventsLoadError}</p>
+            <button type="button" className="portal-text-btn" onClick={() => setSavedEventsVersion((value) => value + 1)}>Retry saved events</button>
+          </>
+        ) : !savedEventsReady ? (
+          <p className="portal-muted" role="status">Loading saved status...</p>
+        ) : saved && (
+          <span className="portal-confirmed">✓ Saved</span>
+        )}
+        {feedback && (
+          <p className={`portal-alert ${feedback.error ? 'portal-error' : 'portal-success'}`} role={feedback.error ? 'alert' : 'status'}>
+            {feedback.message}
+          </p>
+        )}
+      </>
+    )
+  }
   // Public upcoming events
   useEffect(() => {
     if (!isAuthenticated) return
@@ -887,6 +1007,7 @@ function App() {
         >
           {isDetailsLoading ? 'Loading...' : 'View Details →'}
         </button>
+        {renderSavedEventControl(event)}
       </article>
     )
   }
@@ -1675,6 +1796,12 @@ function App() {
                   This event has been cancelled.
                   Please check other upcoming events.
                 </p>
+              )}
+              {isStudent && (
+                <section className="portal-panel" style={{ marginBottom: '18px' }}>
+                  <h2>Saved Event</h2>
+                  {renderSavedEventControl(selectedEvent)}
+                </section>
               )}
               <div className="portal-detail-grid">
                 <section className="portal-panel">
